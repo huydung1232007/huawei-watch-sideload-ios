@@ -10,6 +10,26 @@ enum PineNavigationWire {
     static let phoneFingerprint = "375B477B9A7BA9EDC7509C86E412F7BE2E3DFE40F874A941AF17AC61104AAE48"
     static let watchFingerprint = "com.pineapps.navigation.watch_BJcan6UJzVPTB/tyzfEtHGZsja3l1llwtrOG3sJm4xtA+fY00Jwl6oeZ4ofLOomZC9MVSlToTlVVZd/R+HE/ur8="
 
+    struct PeerIdentity {
+        let phoneFingerprint: String
+        let watchFingerprint: String
+    }
+
+    // Incoming watch->phone data carries the watch's own identifier in tag 05
+    // and the phone identifier expected by that installed app in tag 06.
+    // A Play-distributed phone APK can have a different certificate from the
+    // phone build configured in an older AppGallery watch app.
+    static func peerIdentity(from message: P2P.Message) -> PeerIdentity? {
+        guard message.kind == P2P.Kind.data, message.source == watchPackage,
+              message.destination == phonePackage,
+              let phone = message.destinationFingerprint, phone.utf8.count == 64,
+              phone.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }),
+              let watch = message.sourceFingerprint, watch.hasPrefix(watchPackage + "_"),
+              let key = Data(base64Encoded: String(watch.dropFirst(watchPackage.count + 1))),
+              key.count == 65, key.first == 0x04 else { return nil }
+        return PeerIdentity(phoneFingerprint: phone, watchFingerprint: watch)
+    }
+
     enum Control: String { case ping, initialize = "init", exit = "exitwatch" }
 
     static func control(_ data: [UInt8]) -> Control? {

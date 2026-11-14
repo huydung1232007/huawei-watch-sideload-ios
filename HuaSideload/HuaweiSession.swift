@@ -100,6 +100,7 @@ final class HuaweiSession {
 
     // P2P data from apps on the watch (source package, data)
     var onAppMessage: ((String, [UInt8]) -> Void)?
+    var onP2PPeerMessage: ((P2P.Message) -> Void)?
 
     // The watch asks for the title and artist of an uploaded music file (index, file name)
     var onMusicFileInfo: ((Int, String) -> Void)?
@@ -881,6 +882,7 @@ final class HuaweiSession {
         }
         // Ping/data started by the watch: acknowledge like HuaweiBaseP2PService.handlePacket
         guard message.kind == P2P.Kind.ping || message.kind == P2P.Kind.data else { return }
+        onP2PPeerMessage?(message)
         let code = message.kind == P2P.Kind.ping ? P2P.Code.pingReply : P2P.Code.ok
         send(P2P.serviceId, P2P.commandId, P2P.request(kind: P2P.Kind.ack, sequence: message.sequence,
                                                        source: message.destination, destination: message.source, code: code))

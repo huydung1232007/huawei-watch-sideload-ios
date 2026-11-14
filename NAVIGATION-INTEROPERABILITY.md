@@ -34,3 +34,17 @@ that the watch rendered the instruction; physical confirmation is still required
 No subscription, payment, entitlement or licensing mechanism is modified by this test.
 No proprietary app source or image assets are redistributed. Only interface identifiers
 and message field meanings are used by the independent implementation.
+
+The user reported code 206 while the watch still emitted init/ping. Huawei documents
+206 as a general communication failure, including possible peer identity mismatch;
+it must not be labelled only as "app not running".
+https://developer.huawei.com/consumer/en/doc/connectivity-guides/faq-0000001050818031/
+
+Version 1.1.4 build 6 preserves P2P fingerprint tags 05/06 previously discarded by
+the parser, and learns the watch's source fingerprint and expected phone destination
+fingerprint from packets belonging to the exact Navigation peer pair. It validates
+the public-identifier formats, keeps them only for the connection, and logs only
+whether the phone identifier differs from the APK. Actual values are not published.
+When init/ping established that the app is open, it sends guidance directly instead
+of first sending the optional activation command. Outcomes log the failing stage.
+This is a proposed compatibility fix; device-side success still needs confirmation.

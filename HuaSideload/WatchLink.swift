@@ -38,6 +38,8 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var installedApps: [WatchApps.Installed] = []
     @Published private(set) var watchUDID: String?
     @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
+    private var navigationPeer: PineNavigationWire.PeerIdentity?
+    private var navigationIsOpen = false
     // Identity details (UDID, serial number, MAC) stay hidden on screen and in the log, e.g. while filming
     @Published var revealIdentity = false
     private var secrets: [String] = []
@@ -118,9 +120,15 @@ final class WatchLink: NSObject, ObservableObject {
             if source == PineNavigationWire.watchPackage {
                 if let control = PineNavigationWire.control(data) {
                     switch control {
-                    case .ping: self.navigationStatus = "Navigation đang chờ chỉ dẫn."
-                    case .initialize: self.navigationStatus = "Navigation đã mở trên đồng hồ."
-                    case .exit: self.navigationStatus = "Navigation đã đóng trên đồng hồ."
+                    case .ping:
+                        self.navigationIsOpen = true
+                        self.navigationStatus = "Navigation đang chờ chỉ dẫn."
+                    case .initialize:
+                        self.navigationIsOpen = true
+                        self.navigationStatus = "Navigation đã mở trên đồng hồ."
+                    case .exit:
+                        self.navigationIsOpen = false
+                        self.navigationStatus = "Navigation đã đóng trên đồng hồ."
                     }
                     self.append(.info, "Navigation control: \(control.rawValue)")
                 } else {
@@ -137,6 +145,15 @@ final class WatchLink: NSObject, ObservableObject {
                 return
             }
             bridge.receive(from: source, data: data)
+        }
+        session.onP2PPeerMessage = { [weak self] message in
+            guard let self, message.source == PineNavigationWire.watchPackage else { return }
+            if let peer = PineNavigationWire.peerIdentity(from: message) {
+                self.navigationPeer = peer
+                self.append(.info, "Navigation peer identity learned from watch; phone differs from APK: \(peer.phoneFingerprint != PineNavigationWire.phoneFingerprint)")
+            } else if message.kind == P2P.Kind.data {
+                self.append(.info, "Navigation peer metadata: watch tag \(message.sourceFingerprint?.utf8.count ?? 0)B, phone tag \(message.destinationFingerprint?.utf8.count ?? 0)B; using APK identity fallback")
+            }
         }
         for feature in features { feature.attach(to: self) }
         append(.info, L("Features: ", "Özellikler: ") + features.map { String(describing: type(of: $0)) }.joined(separator: ", ")
@@ -322,6 +339,8 @@ final class WatchLink: NSObject, ObservableObject {
         connectedName = nil
         battery = nil
         navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
+        navigationPeer = nil
+        navigationIsOpen = false
         watchInfo = []
         servicesAwaitingCharacteristics = 0
         parser.reset()
@@ -335,8 +354,10 @@ final class WatchLink: NSObject, ObservableObject {
         run("Sending Navigation demo") { session in
             self.navigationStatus = "Đang gửi chỉ dẫn mẫu…"
             do {
-                try await self.navigationSend(PineNavigationWire.start, session: session)
-                try await self.navigationSend(try PineNavigationWire.demonstration(turn), session: session)
+                if !self.navigationIsOpen {
+                    try await self.navigationSend(PineNavigationWire.start, session: session, label: "start")
+                }
+                try await self.navigationSend(try PineNavigationWire.demonstration(turn), session: session, label: "guidance")
                 self.navigationStatus = "Đồng hồ đã xác nhận nhận dữ liệu mẫu. Kiểm tra màn hình đồng hồ."
             } catch {
                 self.navigationStatus = "Gửi mẫu thất bại: \(error)"
@@ -349,7 +370,7 @@ final class WatchLink: NSObject, ObservableObject {
         guard isPaired else { return }
         run("Stopping Navigation demo") { session in
             do {
-                try await self.navigationSend(PineNavigationWire.stop, session: session)
+                try await self.navigationSend(PineNavigationWire.stop, session: session, label: "stop")
                 self.navigationStatus = "Đã gửi lệnh dừng mẫu."
             } catch {
                 self.navigationStatus = "Dừng mẫu thất bại: \(error)"
@@ -358,13 +379,14 @@ final class WatchLink: NSObject, ObservableObject {
         }
     }
 
-    private func navigationSend(_ data: [UInt8], session: HuaweiSession) async throws {
+    private func navigationSend(_ data: [UInt8], session: HuaweiSession, label: String) async throws {
+        append(.info, "Navigation TX \(label): \(data.count)B, identity \(navigationPeer == nil ? "APK fallback" : "from watch")")
         let reply = try await session.p2p(kind: P2P.Kind.data,
             source: PineNavigationWire.phonePackage, destination: PineNavigationWire.watchPackage,
-            sourceFingerprint: PineNavigationWire.phoneFingerprint,
-            destinationFingerprint: PineNavigationWire.watchFingerprint, data: data)
+            sourceFingerprint: navigationPeer?.phoneFingerprint ?? PineNavigationWire.phoneFingerprint,
+            destinationFingerprint: navigationPeer?.watchFingerprint ?? PineNavigationWire.watchFingerprint, data: data)
         guard reply.code == P2P.Code.ok else {
-            throw HuaweiAuthError.watchError("Navigation P2P result: \(reply.code.map(String.init) ?? "missing ACK code")")
+            throw HuaweiAuthError.watchError("Navigation \(label) P2P result: \(reply.code.map(String.init) ?? "missing ACK code")")
         }
     }
 

@@ -41,4 +41,36 @@ final class PineNavigationWireTests: XCTestCase {
             instruction: String(repeating: "🚶", count: 180), distance: String(repeating: "🚶", count: 40),
             turn: .straight, eta: String(repeating: "🚶", count: 80), speed: String(repeating: "🚶", count: 40)))
     }
+
+    func testLearnsCorrectFingerprintDirectionFromWatchPacket() throws {
+        let expectedPhone = String(repeating: "AB", count: 32)
+        let packet = P2P.request(kind: P2P.Kind.data, sequence: 17,
+            source: PineNavigationWire.watchPackage, destination: PineNavigationWire.phonePackage,
+            sourceFingerprint: PineNavigationWire.watchFingerprint, destinationFingerprint: expectedPhone,
+            data: Array("init".utf8))
+        let message = try XCTUnwrap(P2P.parse(packet))
+        let peer = try XCTUnwrap(PineNavigationWire.peerIdentity(from: message))
+        XCTAssertEqual(peer.watchFingerprint, PineNavigationWire.watchFingerprint)
+        XCTAssertEqual(peer.phoneFingerprint, expectedPhone)
+        XCTAssertNotEqual(peer.phoneFingerprint, PineNavigationWire.phoneFingerprint)
+    }
+
+    func testIgnoresWrongPeerOrMalformedFingerprint() throws {
+        func message(source: String, phoneFingerprint: String) throws -> P2P.Message {
+            try XCTUnwrap(P2P.parse(P2P.request(kind: P2P.Kind.data, sequence: 1,
+                source: source, destination: PineNavigationWire.phonePackage,
+                sourceFingerprint: PineNavigationWire.watchFingerprint, destinationFingerprint: phoneFingerprint,
+                data: Array("ping".utf8))))
+        }
+        XCTAssertNil(PineNavigationWire.peerIdentity(from: try message(source: "another.watch", phoneFingerprint: PineNavigationWire.phoneFingerprint)))
+        XCTAssertNil(PineNavigationWire.peerIdentity(from: try message(source: PineNavigationWire.watchPackage, phoneFingerprint: "short")))
+        XCTAssertNil(PineNavigationWire.peerIdentity(from: try message(source: PineNavigationWire.watchPackage, phoneFingerprint: String(repeating: "Z", count: 64))))
+    }
+
+    func testParsesSingleByteCommunicationFailureCode() throws {
+        let packet = HuaweiTLV().with(0x01, [P2P.Kind.ack]).with(0x02, [0, 1])
+            .with(0x03, Array(PineNavigationWire.watchPackage.utf8))
+            .with(0x04, Array(PineNavigationWire.phonePackage.utf8)).with(0x08, [0xCE])
+        XCTAssertEqual(try XCTUnwrap(P2P.parse(packet)).code, 206)
+    }
 }

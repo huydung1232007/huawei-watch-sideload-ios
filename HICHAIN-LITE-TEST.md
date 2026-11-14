@@ -68,7 +68,7 @@ No Apple signing credentials are needed for the build. Sideload the resulting IP
 using your own Apple ID only after the build/tests succeed and before a supervised test.
 
 Before installing, check that CI succeeded and that the artifact belongs to the exact
-source commit. The IPA's display name is `HuaSideload Lite Test`, version 1.1.3 build 5.
+source commit. The IPA's display name is `HuaSideload Lite Test`, version 1.1.4 build 6.
 Retain build/test logs and IPA SHA-256 alongside the artifact.
 
 ## Provenance and license
