@@ -41,7 +41,7 @@ enum PineNavigationWire {
     static let stop = Array(#"{"r":"1"}"#.utf8)
 
     enum Turn: String, CaseIterable, Identifiable {
-        case straight, left, right, destination
+        case straight, left, right, uTurn, destination, unspecified
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -49,6 +49,8 @@ enum PineNavigationWire {
             case .left: return "normal_left_16.png"
             case .right: return "normal_right_16.png"
             case .destination: return "destination_16.png"
+            case .uTurn: return "uturn_left_16.png"
+            case .unspecified: return "head_towards_16.png"
             }
         }
         var title: String {
@@ -57,6 +59,8 @@ enum PineNavigationWire {
             case .left: return "Rẽ trái"
             case .right: return "Rẽ phải"
             case .destination: return "Đến nơi"
+            case .uTurn: return "Quay đầu"
+            case .unspecified: return "Xem chỉ dẫn"
             }
         }
     }

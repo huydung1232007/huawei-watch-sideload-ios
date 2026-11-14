@@ -62,14 +62,15 @@ struct ContentView: View {
 
             page(L("Features", "Özellikler")) {
                 if link.isPaired {
+                    NavigationRouteSection(navigator: link.routeNavigator, link: link)
                     Section("Navigation Watch — thử hiển thị") {
                         Text(link.navigationStatus).font(.callout)
                         ForEach(PineNavigationWire.Turn.allCases) { turn in
                             Button("Gửi mẫu: " + turn.title) { link.sendNavigationDemo(turn) }
-                                .disabled(link.busy != nil)
+                                .disabled(link.commandsLocked)
                         }
                         Button("Dừng mẫu") { link.stopNavigationDemo() }
-                            .disabled(link.busy != nil)
+                            .disabled(link.commandsLocked)
                         Text("Chỉ dẫn mẫu có chữ DEMO, không phải tuyến đường thật.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
@@ -212,7 +213,7 @@ struct ContentView: View {
                 Button(link.hasSavedPairing ? L("Pair (saved key)", "Eşleş (kayıtlı anahtarla)") : L("Pair", "Eşleş")) {
                     if link.hasSavedPairing { link.pair() } else { confirmingFirstPairing = true }
                 }
-                .disabled(!link.huaweiChannelReady || link.busy != nil)
+                .disabled(!link.huaweiChannelReady || link.commandsLocked)
                 .fontWeight(.semibold)
                 .confirmationDialog(L("First pairing with this watch", "Bu saatle ilk eşleşme"), isPresented: $confirmingFirstPairing, titleVisibility: .visible) {
                     Button(L("Pair now", "Şimdi eşleş")) { link.pair() }
@@ -241,7 +242,7 @@ struct ContentView: View {
                 }
             } else if !filmMode {
                 Button(L("Refresh battery and watch info", "Pil ve saat bilgisini yenile")) { link.refresh() }
-                    .disabled(link.busy != nil)
+                    .disabled(link.commandsLocked)
             }
             Button(L("Disconnect (release for Huawei Health)", "Bağlantıyı kes (Huawei Health'e bırak)"), role: .destructive) { link.disconnect() }
         } header: {
@@ -280,7 +281,7 @@ struct ContentView: View {
                         Text("\(app.version) · \(app.data.count / 1024) KB").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .disabled(link.busy != nil)
+                .disabled(link.commandsLocked)
             }
             ForEach(link.installedApps) { app in
                 HStack {
@@ -291,11 +292,11 @@ struct ContentView: View {
                     Spacer()
                     Button(L("Delete", "Sil"), role: .destructive) { link.deleteWatchApp(app) }
                         .buttonStyle(.borderless)
-                        .disabled(link.busy != nil)
+                        .disabled(link.commandsLocked)
                 }
             }
             Button(L("Show apps on the watch", "Saatteki uygulamaları göster")) { link.loadInstalledApps() }
-                .disabled(link.busy != nil)
+                .disabled(link.commandsLocked)
         } header: {
             Text(L("Watch apps", "Saat uygulamaları"))
         } footer: {
@@ -323,7 +324,7 @@ struct ContentView: View {
                 let compatibility = WatchFaceCompatibility.evaluate(screenCode: WatchFaceCatalog.screens[url] ?? "?", device: link.watchFaceParams)
                 VStack(alignment: .leading, spacing: 2) {
                     Button(L("Install the \(name) watch face", "\(name) kadranını saate kur")) { link.installWatchFace(url, title: name) }
-                        .disabled(link.busy != nil || compatibility.blocksInstall)
+                        .disabled(link.commandsLocked || compatibility.blocksInstall)
                         .fontWeight(.semibold)
                     if link.watchFaceParams != nil {
                         Text(compatibility.label).font(.caption).foregroundStyle(.secondary)
@@ -332,13 +333,13 @@ struct ContentView: View {
             }
             if !filmMode {
                 Button(L("Install a watch face (.hwt)", "Saate kadran yükle (.hwt)")) { pickingWatchFace = true }
-                    .disabled(link.busy != nil)
+                    .disabled(link.commandsLocked)
                     .fontWeight(WatchFaceCatalog.all.isEmpty ? .semibold : .regular)
                 // Newer watches may want the face in another form; nothing tells which, so it is a setting to try
                 Picker(L("Upload method", "Yükleme yöntemi"), selection: $faceUploadMethod) {
                     ForEach(WatchFaceUploadMethod.allCases) { Text($0.label).tag($0.rawValue) }
                 }
-                .disabled(link.busy != nil)
+                .disabled(link.commandsLocked)
             }
         } header: {
             Text(L("Watch faces", "Kadranlar"))
@@ -359,7 +360,7 @@ struct ContentView: View {
                 Text(status).font(.callout)
             }
             Button(L("Upload music to the watch", "Saate müzik yükle")) { pickingMusic = true }
-                .disabled(link.busy != nil)
+                .disabled(link.commandsLocked)
                 .fontWeight(.semibold)
             if let storage = link.musicStorage {
                 LabeledContent(L("On the watch", "Saatte"),
@@ -367,7 +368,7 @@ struct ContentView: View {
                                         "\(storage.songs)/\(storage.maxSongs) şarkı · \(storage.freeMB) MB boş"))
             }
             Button(L("Show the watch's music storage", "Saatin müzik hafızasını göster")) { link.loadMusicStorage() }
-                .disabled(link.busy != nil)
+                .disabled(link.commandsLocked)
         } header: {
             Text(L("Watch music player", "Saatin müzik çaları"))
         } footer: {
@@ -394,7 +395,7 @@ struct ContentView: View {
                 messageFocused = false
                 link.sendMessage(message)
             }
-                .disabled(link.busy != nil || message.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(link.commandsLocked || message.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }
 

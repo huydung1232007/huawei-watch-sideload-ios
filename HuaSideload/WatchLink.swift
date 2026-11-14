@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreBluetooth
+import Combine
 import Foundation
 import UIKit
 
@@ -40,6 +41,13 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
     private var navigationPeer: PineNavigationWire.PeerIdentity?
     private var navigationIsOpen = false
+    let routeNavigator = RouteNavigator()
+    private var pendingRouteData: [UInt8]?
+    private var pendingRouteStop = false
+    private var routeDelivery: Task<Void, Never>?
+    private var routeDeliveryGeneration = 0
+    private var routeChanges: AnyCancellable?
+    var commandsLocked: Bool { busy != nil || routeNavigator.isNavigating || routeDelivery != nil }
     // Identity details (UDID, serial number, MAC) stay hidden on screen and in the log, e.g. while filming
     @Published var revealIdentity = false
     private var secrets: [String] = []
@@ -86,6 +94,9 @@ final class WatchLink: NSObject, ObservableObject {
     override init() {
         features = WatchFeatures.load()
         super.init()
+        routeChanges = routeNavigator.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        routeNavigator.onGuidance = { [weak self] data in self?.queueRouteGuidance(data) }
+        routeNavigator.onStop = { [weak self] in self?.queueRouteStop() }
         speaker.log = { [weak self] kind, text in self?.append(kind, text) }
         session = HuaweiSession(
             writeFrame: { [weak self] frame in self?.write(frame) },
@@ -129,6 +140,8 @@ final class WatchLink: NSObject, ObservableObject {
                     case .exit:
                         self.navigationIsOpen = false
                         self.navigationStatus = "Navigation đã đóng trên đồng hồ."
+                        self.pendingRouteData = nil
+                        self.routeNavigator.stop(reason: "Navigation đã đóng trên đồng hồ. Mở lại rồi bấm Bắt đầu.", notifyWatch: false)
                     }
                     self.append(.info, "Navigation control: \(control.rawValue)")
                 } else {
@@ -328,6 +341,11 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func resetConnectionState() {
+        routeNavigator.deliveryFailed("Mất kết nối Bluetooth. Kết nối lại và bắt đầu tuyến từ vị trí hiện tại.")
+        routeDeliveryGeneration &+= 1
+        routeDelivery?.cancel(); routeDelivery = nil
+        if busy == "Sending route guidance" { busy = nil }
+        pendingRouteData = nil; pendingRouteStop = false
         bridges.values.forEach { $0.reset() }
         features.forEach { $0.connectionLost() }
         writeCharacteristic = nil
@@ -350,7 +368,7 @@ final class WatchLink: NSObject, ObservableObject {
     // MARK: - Watch commands
 
     func sendNavigationDemo(_ turn: PineNavigationWire.Turn) {
-        guard isPaired else { return }
+        guard isPaired, !routeNavigator.isNavigating, routeDelivery == nil else { return }
         run("Sending Navigation demo") { session in
             self.navigationStatus = "Đang gửi chỉ dẫn mẫu…"
             do {
@@ -367,7 +385,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     func stopNavigationDemo() {
-        guard isPaired else { return }
+        guard isPaired, !routeNavigator.isNavigating, routeDelivery == nil else { return }
         run("Stopping Navigation demo") { session in
             do {
                 try await self.navigationSend(PineNavigationWire.stop, session: session, label: "stop")
@@ -375,6 +393,78 @@ final class WatchLink: NSObject, ObservableObject {
             } catch {
                 self.navigationStatus = "Dừng mẫu thất bại: \(error)"
                 throw error
+            }
+        }
+    }
+
+    private func queueRouteGuidance(_ data: [UInt8]) {
+        guard isPaired else {
+            routeNavigator.deliveryFailed("Chưa kết nối với đồng hồ.")
+            return
+        }
+        pendingRouteStop = false
+        pendingRouteData = data // Keep only the newest GPS update while awaiting an ACK.
+        drainRouteMessages()
+    }
+
+    private func queueRouteStop() {
+        pendingRouteData = nil
+        guard isPaired else { return }
+        pendingRouteStop = true
+        drainRouteMessages()
+    }
+
+    private func drainRouteMessages() {
+        guard routeDelivery == nil else { return }
+        let generation = routeDeliveryGeneration
+        var backgroundID: UIBackgroundTaskIdentifier = .invalid
+        backgroundID = UIApplication.shared.beginBackgroundTask(withName: "Navigation delivery") { [weak self] in
+            self?.routeDelivery?.cancel()
+            self?.routeNavigator.deliveryFailed("iOS đã hết thời gian gửi. Mở lại ứng dụng để tiếp tục.")
+            if backgroundID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundID)
+                backgroundID = .invalid
+            }
+        }
+        routeDelivery = Task { [weak self] in
+            guard let self else { return }
+            let label = "Sending route guidance"
+            defer {
+                if backgroundID != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundID)
+                    backgroundID = .invalid
+                }
+                if self.routeDeliveryGeneration == generation {
+                    self.routeDelivery = nil
+                    if self.busy == label { self.busy = nil }
+                }
+            }
+            while self.pendingRouteStop || self.pendingRouteData != nil {
+                while self.busy != nil && !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                }
+                guard !Task.isCancelled, self.routeDeliveryGeneration == generation, self.isPaired else { return }
+                let stopping = self.pendingRouteStop
+                let data = stopping ? PineNavigationWire.stop : self.pendingRouteData
+                self.pendingRouteData = nil; self.pendingRouteStop = false
+                guard let data else { continue }
+                self.busy = label
+                do {
+                    if !stopping && !self.navigationIsOpen {
+                        try await self.navigationSend(PineNavigationWire.start, session: self.session, label: "route start")
+                    }
+                    guard !Task.isCancelled, self.routeDeliveryGeneration == generation else { return }
+                    try await self.navigationSend(data, session: self.session, label: stopping ? "route stop" : "route guidance")
+                    guard !Task.isCancelled, self.routeDeliveryGeneration == generation else { return }
+                    self.navigationStatus = stopping ? "Đã gửi lệnh dừng điều hướng." : "Đồng hồ đã xác nhận nhận chỉ dẫn."
+                } catch {
+                    guard self.routeDeliveryGeneration == generation else { return }
+                    self.pendingRouteData = nil; self.pendingRouteStop = false
+                    self.navigationStatus = "Gửi chỉ dẫn thất bại: \(error)"
+                    self.append(.error, self.navigationStatus)
+                    self.routeNavigator.deliveryFailed(String(describing: error))
+                }
+                if self.busy == label { self.busy = nil }
             }
         }
     }
@@ -889,7 +979,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func run(_ label: String, _ work: @escaping (HuaweiSession) async throws -> Void) {
-        guard busy == nil else { return }
+        guard busy == nil, !routeNavigator.isNavigating, routeDelivery == nil else { return }
         busy = label
         Task {
             do {

@@ -29,11 +29,12 @@ targets:
       path: HuaSideload/Info.plist
       properties:
         CFBundleDisplayName: HuaSideload Lite Test
-        CFBundleShortVersionString: "1.1.4"
-        CFBundleVersion: "6"
+        CFBundleShortVersionString: "1.1.5"
+        CFBundleVersion: "7"
         NSBluetoothAlwaysUsageDescription: Needed to connect to your Huawei watch over Bluetooth.
         # voip: the watch speaker rings the watch with a CallKit call (refused without it); audio: keeps it playing when locked
-        UIBackgroundModes: [bluetooth-central, audio, voip]
+        NSLocationWhenInUseUsageDescription: Dùng vị trí để tìm tuyến đường và gửi chỉ dẫn tới đồng hồ trong chuyến đi bạn bắt đầu, kể cả khi khóa màn hình.
+        UIBackgroundModes: [bluetooth-central, audio, voip, location]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:

@@ -47,4 +47,34 @@ the public-identifier formats, keeps them only for the connection, and logs only
 whether the phone identifier differs from the APK. Actual values are not published.
 When init/ping established that the app is open, it sends guidance directly instead
 of first sending the optional activation command. Outcomes log the failing stage.
-This is a proposed compatibility fix; device-side success still needs confirmation.
+The user subsequently reported that the watch displayed the sample instruction successfully. This validates sample display on that watch, not live route tracking.
+
+
+## Apple Maps route experiment (1.1.5 build 7)
+
+The user accepted Apple Maps as an alternative and requires operation with the iPhone
+screen locked. This build adds an independent MapKit route session inside HuaSideload:
+local place search, walking/automobile route preview, explicit start/stop and GPS route
+progress. It does not read another Maps app's active navigation session. No Google key,
+Google Cloud project, billing setup, captured screen or notification extraction is used.
+
+Core Location background activity and the location background mode keep an explicitly
+started trip eligible for updates when the screen locks. The existing Bluetooth mode
+and a short background task finish each serialized watch send. Only the newest pending
+GPS instruction is retained; stop clears pending guidance. Disconnect, permission loss,
+watch app exit or delivery failure stops the session. Route and coordinates are not
+persisted or written into app-level route logs. MapKit requests necessarily send search
+and route information to Apple's map service. Low/stale GPS is reported on the watch.
+
+Limitations: device-side background behavior still needs a physical test. Force-quitting
+or OS termination stops the trip; it does not automatically restore an active route.
+There is no motorcycle mode or automatic off-route recalculation in this experiment.
+Maneuver icons recognize only supported wording, with a generic icon for unknown text;
+the original Apple instruction is preserved. ETA uses the original route duration scaled
+by remaining distance, not a new live traffic estimate. Keep the Navigation watch app
+open. Search and route availability depend on Apple coverage and connectivity.
+
+References:
+- https://developer.apple.com/documentation/corelocation/handling-location-updates-in-the-background
+- https://developer.apple.com/documentation/mapkit/mkdirections
+- https://www.apple.com/ios/feature-availability/
