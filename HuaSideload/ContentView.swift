@@ -63,17 +63,6 @@ struct ContentView: View {
             page(L("Features", "Özellikler")) {
                 if link.isPaired {
                     NavigationRouteSection(navigator: link.routeNavigator, link: link)
-                    Section("Navigation Watch — thử hiển thị") {
-                        Text(link.navigationStatus).font(.callout)
-                        ForEach(PineNavigationWire.Turn.allCases) { turn in
-                            Button("Gửi mẫu: " + turn.title) { link.sendNavigationDemo(turn) }
-                                .disabled(link.commandsLocked)
-                        }
-                        Button("Dừng mẫu") { link.stopNavigationDemo() }
-                            .disabled(link.commandsLocked)
-                        Text("Chỉ dẫn mẫu có chữ DEMO, không phải tuyến đường thật.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
                     WatchSpeakerSection(speaker: link.speaker)
                     // Feature sections (navigation, remote control etc.); never in filming mode
                     if !filmMode {

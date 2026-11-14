@@ -154,3 +154,8 @@ requires a device-side check after installing the updated IPA.
 References:
 - https://developer.apple.com/documentation/mapkit/mkdirections/request/requestsalternateroutes
 - https://valhalla.github.io/valhalla/api/route/api-reference/
+
+The user also requested removing the Navigation Watch display-test block. The DEMO
+section, sample send/stop methods and demonstration payload helper are removed in
+this build. Its dedicated demo-only test is removed; real guidance/protocol tests
+remain. Navigation is now entered through the Apple-map route-selection section.

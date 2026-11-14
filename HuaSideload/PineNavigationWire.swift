@@ -79,8 +79,4 @@ enum PineNavigationWire {
         guard data.count <= 1000 else { throw HuaweiAuthError.unexpected("Navigation message exceeds 1000 bytes") }
         return Array(data)
     }
-
-    static func demonstration(_ turn: Turn) throws -> [UInt8] {
-        try guidance(instruction: "DEMO - " + turn.title, distance: "100 m", turn: turn)
-    }
 }

@@ -21,15 +21,6 @@ final class PineNavigationWireTests: XCTestCase {
         XCTAssertLessThanOrEqual(bytes.count, 1000)
     }
 
-    func testDemoCannotBeMistakenForRealGuidance() throws {
-        for turn in PineNavigationWire.Turn.allCases {
-            let bytes = try PineNavigationWire.demonstration(turn)
-            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bytes)) as? [String: String])
-            XCTAssertTrue(try XCTUnwrap(object["i"]).hasPrefix("DEMO - "))
-            XCTAssertEqual(object["p"], turn.icon)
-        }
-    }
-
     func testStartAndStopAreDifferentProtocolMessages() throws {
         XCTAssertEqual(String(decoding: PineNavigationWire.start, as: UTF8.self), "start")
         let stop = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(PineNavigationWire.stop)) as? [String: String])

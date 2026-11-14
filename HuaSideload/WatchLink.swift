@@ -38,7 +38,7 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var watchAppProgress: Double?
     @Published private(set) var installedApps: [WatchApps.Installed] = []
     @Published private(set) var watchUDID: String?
-    @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
+    @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
     private var navigationPeer: PineNavigationWire.PeerIdentity?
     private var navigationIsOpen = false
     let routeNavigator = RouteNavigator()
@@ -356,7 +356,7 @@ final class WatchLink: NSObject, ObservableObject {
         faceConfirms.removeAll()
         connectedName = nil
         battery = nil
-        navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
+        navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
         navigationPeer = nil
         navigationIsOpen = false
         watchInfo = []
@@ -366,36 +366,6 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     // MARK: - Watch commands
-
-    func sendNavigationDemo(_ turn: PineNavigationWire.Turn) {
-        guard isPaired, !routeNavigator.isNavigating, routeDelivery == nil else { return }
-        run("Sending Navigation demo") { session in
-            self.navigationStatus = "Đang gửi chỉ dẫn mẫu…"
-            do {
-                if !self.navigationIsOpen {
-                    try await self.navigationSend(PineNavigationWire.start, session: session, label: "start")
-                }
-                try await self.navigationSend(try PineNavigationWire.demonstration(turn), session: session, label: "guidance")
-                self.navigationStatus = "Đồng hồ đã xác nhận nhận dữ liệu mẫu. Kiểm tra màn hình đồng hồ."
-            } catch {
-                self.navigationStatus = "Gửi mẫu thất bại: \(error)"
-                throw error
-            }
-        }
-    }
-
-    func stopNavigationDemo() {
-        guard isPaired, !routeNavigator.isNavigating, routeDelivery == nil else { return }
-        run("Stopping Navigation demo") { session in
-            do {
-                try await self.navigationSend(PineNavigationWire.stop, session: session, label: "stop")
-                self.navigationStatus = "Đã gửi lệnh dừng mẫu."
-            } catch {
-                self.navigationStatus = "Dừng mẫu thất bại: \(error)"
-                throw error
-            }
-        }
-    }
 
     func startRouteNavigation() {
         guard isPaired, !commandsLocked else { return }
