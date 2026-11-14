@@ -6,7 +6,6 @@ on:
       - 'watch-apps/nav-mini/**'
       - 'tools/test-nav-mini.cjs'
       - 'tools/prepare-nav-mini-sdk.py'
-      - 'tools/download-nav-mini-sdk.py'
       - 'tools/build-watch-app.sh'
       - '.github/workflows/build-nav-mini.yml'
   workflow_dispatch:
@@ -35,7 +34,7 @@ jobs:
       - name: Download and verify official legacy SDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          python3 tools/download-nav-mini-sdk.py "$RUNNER_TEMP/ohos9.tar.gz"
+          curl --fail --location --retry 1 --connect-timeout 20 --max-time 900 https://repo.huaweicloud.com/openharmony/os/3.2-Release/L2-SDK-MAC-M1-PUBLIC.tar.gz -o "$RUNNER_TEMP/ohos9.tar.gz"
           python3 tools/prepare-nav-mini-sdk.py "$RUNNER_TEMP/ohos9.tar.gz" "$RUNNER_TEMP/ohos9"
       - uses: actions/cache/save@v4
         if: steps.sdk-cache.outputs.cache-hit != 'true'
