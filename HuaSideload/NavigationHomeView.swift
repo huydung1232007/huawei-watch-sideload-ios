@@ -328,7 +328,7 @@ private struct NavigationSettingsView: View {
                     Toggle("Nhắc hai chỗ rẽ sát nhau",isOn:$navigator.chainedTurnsEnabled)
                     Toggle("Tổng km/phút trên đồng hồ",isOn:$navigator.watchTripInfoEnabled)
                 } header: { Label("Nội dung Navigation",systemImage:"text.alignleft") }
-                footer: { Text("Nhắc thao tác tiếp theo khi hai chỗ rẽ cách 10–100 m và bạn đang tới gần chỗ rẽ đầu. Tổng km/phút và giờ đến là ước tính theo tuyến; cách hiện vùng phụ tùy phiên bản Navigation trên đồng hồ. Tắt nếu chữ bị cắt.") }
+                footer: { Text("Nhắc thao tác tiếp theo khi hai chỗ rẽ cách 10–100 m và bạn đang tới gần chỗ rẽ đầu. Ô phụ luân phiên tổng km và thời gian còn lại khoảng mỗi 5 giây khi có cập nhật GPS. Giờ đến và thời gian là ước tính theo tuyến.") }
                 Section {
                     Text(navigator.locationStatus).font(.footnote)
                     Text(link.navigationDeliveryInfo).font(.footnote)

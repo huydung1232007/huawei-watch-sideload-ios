@@ -27,12 +27,12 @@ enum WatchGuidancePresentation {
             : "\(max(0,Int((meters/5).rounded())*5))m"
         return "\(distance) · \(max(1,Int(ceil(seconds/60))))ph"
     }
-    static func arrivalField(clock: String,meters: Double,seconds: Double,expanded: Bool) -> String {
+    static func arrivalField(clock: String,meters: Double,seconds: Double,expanded: Bool,displayDuration: Bool = false) -> String {
         let time = String(clock.filter { $0 != ";" && !$0.isNewline }.prefix(12))
         guard expanded,summary(meters:meters,seconds:seconds) != nil else { return time+";ETA;;" }
-        // GT 2 Pro has a narrow fixed-height trip area. The 1.3.0 combined
-        // "36.0km · 82ph" wrapped and was clipped on the user's watch. Use
-        // separate short caption/detail slots, never a combined sentence.
+        // Hardware feedback: the third slot is visible but long combined text
+        // clips, while the second caption slot is ignored on this GT 2 Pro.
+        // Alternate short values in the confirmed visible third slot.
         let minutes = max(1,Int(ceil(seconds/60)))
         let duration: String
         if minutes < 60 { duration = "\(minutes)p" }
@@ -44,6 +44,6 @@ enum WatchGuidancePresentation {
         else if roundedKm < 10 { distance = String(format:"%.1fkm",locale:Locale(identifier:"en_US_POSIX"),roundedKm) }
         else if roundedKm <= 999 { distance = "\(Int(roundedKm.rounded()))km" }
         else { distance = ">999km" }
-        return time+";"+duration+";"+distance+";"
+        return time+";;"+(displayDuration ? duration : distance)+";"
     }
 }

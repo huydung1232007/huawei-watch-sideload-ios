@@ -664,7 +664,8 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         status = "Đang điều hướng · còn \(remainingTripSummary) · ước tính"
         let formatter = DateFormatter(); formatter.dateFormat = "HH:mm"
         let eta = WatchGuidancePresentation.arrivalField(clock:formatter.string(from:Date().addingTimeInterval(secondsRemaining)),
-            meters:totalRemaining,seconds:secondsRemaining,expanded:watchTripInfoEnabled)
+            meters:totalRemaining,seconds:secondsRemaining,expanded:watchTripInfoEnabled,
+            displayDuration:Int(Date().timeIntervalSinceReferenceDate/5).isMultiple(of:2))
         let following = maneuverIndex+1 < maneuvers.count ? maneuvers[maneuverIndex+1] : nil
         let followUp = chainedTurnsEnabled ? WatchGuidancePresentation.followUp(current:next.turn,remaining:remaining,
             next:following?.turn,gap:following.map { $0.at-next.at }) : ""

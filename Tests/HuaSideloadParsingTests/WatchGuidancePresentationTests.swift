@@ -26,7 +26,7 @@ final class WatchGuidancePresentationTests: XCTestCase {
     }
     func testExpandedArrivalUsesObservedFourSlotLayout() {
         let field = WatchGuidancePresentation.arrivalField(clock:"18:45",meters:3200,seconds:540,expanded:true)
-        XCTAssertEqual(field,"18:45;9p;3.2km;")
+        XCTAssertEqual(field,"18:45;;3.2km;")
         XCTAssertEqual(field.components(separatedBy:";").count,4)
     }
     func testCompactSettingRestoresExistingArrivalPayload() {
@@ -48,24 +48,34 @@ final class WatchGuidancePresentationTests: XCTestCase {
         let packet = try XCTUnwrap(JSONSerialization.jsonObject(with:Data(bytes)) as? [String:String])
         XCTAssertEqual(packet["d"],"50 m"); XCTAssertEqual(packet["p"],"normal_left_16.png")
         XCTAssertEqual(packet["s"],"32;km/h"); XCTAssertEqual(packet["v"],"L")
-        XCTAssertEqual(packet["e"],"18:45;9p;3.2km;")
+        XCTAssertEqual(packet["e"],"18:45;;3.2km;")
         XCTAssertTrue(packet["i"]?.contains("Sau đó rẽ phải sau 60 m") == true)
         XCTAssertLessThan(bytes.count,1000)
     }
     func testThirtySixKmWatchRegressionUsesSeparateShortLabels() {
-        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:82*60,expanded:true),"03:26;1h22;36km;")
-        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:120*60,expanded:true),"03:26;2h;36km;")
-        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:142*60,expanded:true),"03:26;2h22;36km;")
+        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:82*60,expanded:true),"03:26;;36km;")
+        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:82*60,expanded:true,displayDuration:true),"03:26;;1h22;")
+        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:120*60,expanded:true,displayDuration:true),"03:26;;2h;")
+        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:26",meters:36_000,seconds:142*60,expanded:true,displayDuration:true),"03:26;;2h22;")
     }
     func testWatchDetailNeverContainsWrappedCombinedSummary() {
         for meters in [80.0,995,3200,9999,36_000,100_000,1_000_000] {
             for seconds in [60.0,6000,86_400,604_800] {
-                let fields = WatchGuidancePresentation.arrivalField(clock:"18:45",meters:meters,seconds:seconds,expanded:true).components(separatedBy:";")
-                XCTAssertEqual(fields.count,4)
-                XCTAssertLessThanOrEqual(fields[1].count,6)
-                XCTAssertLessThanOrEqual(fields[2].count,6)
-                XCTAssertFalse(fields[2].contains("·")); XCTAssertFalse(fields[2].contains(" "))
+                for duration in [false,true] {
+                    let fields = WatchGuidancePresentation.arrivalField(clock:"18:45",meters:meters,seconds:seconds,expanded:true,displayDuration:duration).components(separatedBy:";")
+                    XCTAssertEqual(fields.count,4)
+                    XCTAssertEqual(fields[1],"")
+                    XCTAssertLessThanOrEqual(fields[2].count,6)
+                    XCTAssertFalse(fields[2].contains("·")); XCTAssertFalse(fields[2].contains(" "))
+                }
             }
         }
+    }
+    func testRotationKeepsArrivalClockAndUsesTheVisibleSlotOnly() {
+        let distance = WatchGuidancePresentation.arrivalField(clock:"03:38",meters:36_000,seconds:81*60,expanded:true)
+        let time = WatchGuidancePresentation.arrivalField(clock:"03:38",meters:36_000,seconds:81*60,expanded:true,displayDuration:true)
+        XCTAssertEqual(distance,"03:38;;36km;")
+        XCTAssertEqual(time,"03:38;;1h21;")
+        XCTAssertEqual(WatchGuidancePresentation.arrivalField(clock:"03:38",meters:36_000,seconds:81*60,expanded:false,displayDuration:true),"03:38;ETA;;")
     }
 }
