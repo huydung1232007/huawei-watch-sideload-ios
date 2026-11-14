@@ -29,12 +29,14 @@ targets:
       path: HuaSideload/Info.plist
       properties:
         CFBundleDisplayName: HuaSideload Lite Test
-        CFBundleShortVersionString: "1.1.5"
-        CFBundleVersion: "7"
+        CFBundleShortVersionString: "1.1.6"
+        CFBundleVersion: "8"
         NSBluetoothAlwaysUsageDescription: Needed to connect to your Huawei watch over Bluetooth.
         # voip: the watch speaker rings the watch with a CallKit call (refused without it); audio: keeps it playing when locked
         NSLocationWhenInUseUsageDescription: Dùng vị trí để tìm tuyến đường và gửi chỉ dẫn tới đồng hồ trong chuyến đi bạn bắt đầu, kể cả khi khóa màn hình.
-        UIBackgroundModes: [bluetooth-central, audio, voip, location]
+        NSScreenCaptureUsageDescription: Đọc chỉ dẫn đang hiển thị trong Google Maps để gửi tới đồng hồ. Không thu âm hay lưu ảnh màn hình.
+        LSApplicationQueriesSchemes: [comgooglemaps]
+        UIBackgroundModes: [bluetooth-central, audio, voip, location, screen-capture]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:

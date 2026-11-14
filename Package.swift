@@ -14,12 +14,13 @@ let package = Package(
             sources: ["HiChainJSON.swift", "HuaweiProtocol.swift", "Localization.swift", "PairingSetup.swift",
                       "WatchFaceSupport.swift", "WatchFacePackage.swift", "CredentialStore.swift", "HWTAnalyzer.swift",
                       "HuaweiAuth.swift", "HiChainLite.swift", "P2P.swift", "PineNavigationWire.swift",
-                      "RouteProgress.swift", "RouteInstruction.swift"]
+                      "RouteProgress.swift", "RouteInstruction.swift", "MotorcycleRoute.swift", "ScreenNavigation.swift"]
         ),
         .testTarget(
             name: "HuaSideloadParsingTests",
             dependencies: ["HuaSideloadParsing"],
-            path: "Tests/HuaSideloadParsingTests"
+            path: "Tests/HuaSideloadParsingTests",
+            resources: [.process("Fixtures")]
         ),
     ]
 )

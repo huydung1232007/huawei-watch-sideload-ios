@@ -83,3 +83,11 @@ References inspected:
 - https://github.com/Freeyourgadget/Gadgetbridge/blob/master/app/src/main/java/nodomain/freeyourgadget/gadgetbridge/service/devices/huawei/requests/GetAuthRequest.java
 - https://github.com/Freeyourgadget/Gadgetbridge/blob/master/app/src/main/java/nodomain/freeyourgadget/gadgetbridge/service/devices/huawei/requests/GetBondRequest.java
 - https://github.com/Freeyourgadget/Gadgetbridge/blob/master/app/src/main/java/nodomain/freeyourgadget/gadgetbridge/service/devices/huawei/HuaweiSupportProvider.java
+
+
+Latest planned build: 1.1.6 build 8 adds experimental Google Maps screen reading
+(iOS 27+) and a separate background motorcycle GPS route mode. See
+NAVIGATION-INTEROPERABILITY.md for provider, privacy and unverified behavior details.
+The user physically confirmed pairing and DEMO display on 1.1.4. The 1.1.5 CI run
+found a Vietnamese normalization test failure before app compilation; that failure
+was corrected by normalizing the letter đ explicitly in 1.1.6.

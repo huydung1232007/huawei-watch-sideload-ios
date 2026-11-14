@@ -78,3 +78,48 @@ References:
 - https://developer.apple.com/documentation/corelocation/handling-location-updates-in-the-background
 - https://developer.apple.com/documentation/mapkit/mkdirections
 - https://www.apple.com/ios/feature-availability/
+
+
+## Dual-mode prototype (1.1.6 build 8)
+
+The user subsequently requires motorcycles and accepts Google Maps with the screen on.
+The current prototype therefore offers two mutually exclusive guidance sources:
+
+1. An iOS 27+ ScreenCaptureKit full-display stream selected through Apple's system
+   picker, with on-device Vision OCR and independent geometric arrow templates.
+   The user starts motorcycle navigation in Google Maps, enables screen sharing,
+   and keeps Maps visible in portrait orientation. No audio output is attached,
+   screenshots are not saved, and image buffers never leave the phone. A Google
+   navigation banner, remaining duration and Google/Exit context must be recognized
+   before producing guidance. Unsupported/uncertain arrow shapes keep a generic icon
+   and an explicit request to consult Maps. Switching away clears guidance after an
+   observation timeout; stream inactivity/lock stops capture. No direct Maps API or
+   cross-app notification reader is claimed. Recognition still needs physical validation.
+2. A background GPS session with destination search and map display from Apple.
+   The motorcycle route itself comes from Valhalla/OpenStreetMap, NOT Apple's
+   automobile profile. The user is informed in the UI that route endpoints are sent
+   to the FOSSGIS demo endpoint on an explicit Calculate action. Requests use the
+   motorcycle profile, never ignore access restrictions and never fall back to auto.
+   Highway avoidance is a preference; the decoder independently refuses returned
+   highway routes or missing highway classification. Routes must explicitly report
+   motorcycle travel type. The personal experiment limits requests to one per three
+   seconds and destinations within 100 km; no continuous server polling/rerouting is
+   performed. OSM attribution is visible. Walking/automobile remain separate modes.
+
+A public-landmark-only 482 m HCMC motorcycle response was obtained for a bounded API
+probe. It is a parser fixture; it is not a navigation safety or background-execution test.
+The probe's hard-exclusion option produced warning 208 (not supported by that server).
+The app does NOT request hard exclusions and does not claim they are enforced. Instead,
+it refuses any response whose has_highway field is missing/true or maneuver flags
+report a highway. This can conservatively refuse some valid local routes as well.
+
+No end-user release or server service is deployed. This is a personal sideloaded trial;
+public demo fair-use rules apply. A general distribution should arrange a provider or
+self-host and notify the demo operator as its README requests; no such notice has been
+sent by the assistant. The request header identifies this experimental fork.
+
+References:
+- https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-on-ios
+- https://developer.apple.com/documentation/mapkit/mkdirectionstransporttype
+- https://github.com/valhalla/valhalla#demo-server
+- https://valhalla.github.io/valhalla/api/route/api-reference/

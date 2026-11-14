@@ -6,6 +6,7 @@ enum RouteInstruction {
     static func turn(for text: String) -> PineNavigationWire.Turn {
         let value = text.folding(options: [.caseInsensitive, .diacriticInsensitive],
                                  locale: Locale(identifier: "en_US_POSIX"))
+            .replacingOccurrences(of: "đ", with: "d")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if value.contains("roundabout") || value.contains("vong xuyen") || value.contains("bung binh") { return .unspecified }
         if value.hasPrefix("make a u-turn") || value.hasPrefix("u-turn") || value.hasPrefix("quay dau") { return .uTurn }

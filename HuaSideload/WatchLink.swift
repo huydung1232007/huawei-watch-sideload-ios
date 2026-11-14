@@ -42,12 +42,14 @@ final class WatchLink: NSObject, ObservableObject {
     private var navigationPeer: PineNavigationWire.PeerIdentity?
     private var navigationIsOpen = false
     let routeNavigator = RouteNavigator()
+    let mapsReader = MapsScreenReader()
     private var pendingRouteData: [UInt8]?
     private var pendingRouteStop = false
     private var routeDelivery: Task<Void, Never>?
     private var routeDeliveryGeneration = 0
     private var routeChanges: AnyCancellable?
-    var commandsLocked: Bool { busy != nil || routeNavigator.isNavigating || routeDelivery != nil }
+    private var readerChanges: AnyCancellable?
+    var commandsLocked: Bool { busy != nil || routeNavigator.isNavigating || mapsReader.isReading || routeDelivery != nil }
     // Identity details (UDID, serial number, MAC) stay hidden on screen and in the log, e.g. while filming
     @Published var revealIdentity = false
     private var secrets: [String] = []
@@ -95,6 +97,9 @@ final class WatchLink: NSObject, ObservableObject {
         features = WatchFeatures.load()
         super.init()
         routeChanges = routeNavigator.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        readerChanges = mapsReader.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        mapsReader.onGuidance = { [weak self] data in self?.queueRouteGuidance(data) }
+        mapsReader.onStop = { [weak self] in self?.queueRouteStop() }
         routeNavigator.onGuidance = { [weak self] data in self?.queueRouteGuidance(data) }
         routeNavigator.onStop = { [weak self] in self?.queueRouteStop() }
         speaker.log = { [weak self] kind, text in self?.append(kind, text) }
@@ -141,6 +146,7 @@ final class WatchLink: NSObject, ObservableObject {
                         self.navigationIsOpen = false
                         self.navigationStatus = "Navigation đã đóng trên đồng hồ."
                         self.pendingRouteData = nil
+                        self.mapsReader.stop(reason: "Navigation đã đóng trên đồng hồ.", notifyWatch: false)
                         self.routeNavigator.stop(reason: "Navigation đã đóng trên đồng hồ. Mở lại rồi bấm Bắt đầu.", notifyWatch: false)
                     }
                     self.append(.info, "Navigation control: \(control.rawValue)")
@@ -341,6 +347,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func resetConnectionState() {
+        mapsReader.stop(reason: "Đã dừng đọc Google Maps vì mất kết nối đồng hồ.", notifyWatch: false)
         routeNavigator.deliveryFailed("Mất kết nối Bluetooth. Kết nối lại và bắt đầu tuyến từ vị trí hiện tại.")
         routeDeliveryGeneration &+= 1
         routeDelivery?.cancel(); routeDelivery = nil
@@ -368,7 +375,7 @@ final class WatchLink: NSObject, ObservableObject {
     // MARK: - Watch commands
 
     func sendNavigationDemo(_ turn: PineNavigationWire.Turn) {
-        guard isPaired, !routeNavigator.isNavigating, routeDelivery == nil else { return }
+        guard isPaired, !routeNavigator.isNavigating, !mapsReader.isReading, routeDelivery == nil else { return }
         run("Sending Navigation demo") { session in
             self.navigationStatus = "Đang gửi chỉ dẫn mẫu…"
             do {
@@ -385,7 +392,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     func stopNavigationDemo() {
-        guard isPaired, !routeNavigator.isNavigating, routeDelivery == nil else { return }
+        guard isPaired, !routeNavigator.isNavigating, !mapsReader.isReading, routeDelivery == nil else { return }
         run("Stopping Navigation demo") { session in
             do {
                 try await self.navigationSend(PineNavigationWire.stop, session: session, label: "stop")
@@ -397,9 +404,22 @@ final class WatchLink: NSObject, ObservableObject {
         }
     }
 
+    func startGoogleMapsCapture() {
+        guard isPaired, !commandsLocked else { return }
+        routeNavigator.stop()
+        mapsReader.start()
+    }
+
+    func startRouteNavigation() {
+        guard isPaired, !commandsLocked else { return }
+        mapsReader.stop(notifyWatch: false)
+        routeNavigator.start()
+    }
+
     private func queueRouteGuidance(_ data: [UInt8]) {
         guard isPaired else {
             routeNavigator.deliveryFailed("Chưa kết nối với đồng hồ.")
+            mapsReader.deliveryFailed("Chưa kết nối với đồng hồ.")
             return
         }
         pendingRouteStop = false
@@ -421,6 +441,7 @@ final class WatchLink: NSObject, ObservableObject {
         backgroundID = UIApplication.shared.beginBackgroundTask(withName: "Navigation delivery") { [weak self] in
             self?.routeDelivery?.cancel()
             self?.routeNavigator.deliveryFailed("iOS đã hết thời gian gửi. Mở lại ứng dụng để tiếp tục.")
+            self?.mapsReader.deliveryFailed("iOS đã hết thời gian gửi. Mở lại ứng dụng để tiếp tục.")
             if backgroundID != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundID)
                 backgroundID = .invalid
@@ -463,6 +484,7 @@ final class WatchLink: NSObject, ObservableObject {
                     self.navigationStatus = "Gửi chỉ dẫn thất bại: \(error)"
                     self.append(.error, self.navigationStatus)
                     self.routeNavigator.deliveryFailed(String(describing: error))
+                    self.mapsReader.deliveryFailed(String(describing: error))
                 }
                 if self.busy == label { self.busy = nil }
             }
@@ -979,7 +1001,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func run(_ label: String, _ work: @escaping (HuaweiSession) async throws -> Void) {
-        guard busy == nil, !routeNavigator.isNavigating, routeDelivery == nil else { return }
+        guard !commandsLocked else { return }
         busy = label
         Task {
             do {

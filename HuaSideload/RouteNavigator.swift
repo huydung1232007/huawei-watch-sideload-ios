@@ -6,9 +6,9 @@ import MapKit
 @MainActor
 final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegate {
     enum Mode: String, CaseIterable, Identifiable {
-        case walking, driving
+        case motorcycle, walking, driving
         var id: String { rawValue }
-        var title: String { self == .walking ? "Đi bộ" : "Ô tô" }
+        var title: String { switch self { case .motorcycle: return "Xe máy"; case .walking: return "Đi bộ"; case .driving: return "Ô tô" } }
         var transport: MKDirectionsTransportType { self == .walking ? .walking : .automobile }
     }
     struct Destination: Identifiable {
@@ -24,7 +24,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     @Published var query = ""
-    @Published var mode: Mode = .walking { didSet { if mode != oldValue { clearPlan() } } }
+    @Published var mode: Mode = .motorcycle { didSet { if mode != oldValue { clearPlan() } } }
     @Published private(set) var results: [Destination] = []
     @Published private(set) var destination: Destination?
     @Published private(set) var locationStatus = "Chưa lấy vị trí."
@@ -37,7 +37,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     @Published private(set) var isNavigating = false
     @Published private(set) var hasLocation = false
     @Published private(set) var hasRoute = false
-    @Published private(set) var displayRoute: MKRoute?
+    @Published private(set) var displayPolyline: MKPolyline?
     @Published private(set) var routeRevision = UUID()
     @Published private(set) var instructionPreview: [String] = []
 
@@ -48,7 +48,11 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private var currentLocation: CLLocation?
     private var search: MKLocalSearch?
     private var directions: MKDirections?
-    private var route: MKRoute?
+    private struct Plan { let polyline: MKPolyline; let distance: Double; let expectedTravelTime: Double }
+    private var route: Plan?
+    private var motorcycleTask: Task<Void, Never>?
+    private var motorcycleRequestID = UUID()
+    private var lastMotorcycleRequest = Date.distantPast
     private var routeOrigin: CLLocation?
     private var backgroundActivity: CLBackgroundActivitySession?
     private var fixMonitor: Task<Void, Never>?
@@ -135,10 +139,11 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     func clearPlan() {
         stop(notifyWatch: true)
         directions?.cancel()
+        motorcycleRequestID = UUID(); motorcycleTask?.cancel(); motorcycleTask = nil
         directions = nil
         isCalculating = false
         route = nil; path = nil; maneuvers = []
-        hasRoute = false; displayRoute = nil; instructionPreview = []; routeOrigin = nil
+        hasRoute = false; displayPolyline = nil; instructionPreview = []; routeOrigin = nil
         preview = ""; instruction = ""; distanceToTurn = ""
     }
 
@@ -151,6 +156,11 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             return
         }
         directions?.cancel()
+        motorcycleRequestID = UUID(); motorcycleTask?.cancel(); motorcycleTask = nil
+        if mode == .motorcycle {
+            calculateMotorcycleRoute(from: location, to: destination)
+            return
+        }
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
         request.destination = destination.item
@@ -160,7 +170,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         directions = operation
         isCalculating = true
         hasRoute = false
-        displayRoute = nil
+        displayPolyline = nil
         instructionPreview = []
         status = "Đang tính tuyến đường bằng Apple Maps…"
         Task {
@@ -202,11 +212,62 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
         if let last = turns.last, last.at >= path.totalLength - 5 { turns.removeLast() }
         turns.append(Maneuver(at: path.totalLength, instruction: "Đến " + (destination?.name ?? "điểm đến"), turn: .destination))
-        self.route = route; self.path = path; maneuvers = turns
-        displayRoute = route; routeRevision = UUID()
+        self.route = Plan(polyline: route.polyline, distance: route.distance, expectedTravelTime: route.expectedTravelTime); self.path = path; maneuvers = turns
+        displayPolyline = route.polyline; routeRevision = UUID()
         instructionPreview = turns.map(\.instruction)
         preview = "\(Self.distance(route.distance)) · khoảng \(max(1, Int(ceil(route.expectedTravelTime / 60)))) phút · \(mode.title)"
         hasRoute = true
+    }
+
+    private func calculateMotorcycleRoute(from location: CLLocation, to destination: Destination) {
+        guard Date().timeIntervalSince(lastMotorcycleRequest) >= 3 else {
+            status = "Đợi vài giây trước khi tính lại tuyến xe máy."
+            return
+        }
+        let target = destination.item.placemark.coordinate
+        guard location.distance(from: CLLocation(latitude: target.latitude, longitude: target.longitude)) < 100_000 else {
+            status = "Bản thử máy chủ công cộng chỉ hỗ trợ điểm đến cách dưới 100 km."
+            return
+        }
+        lastMotorcycleRequest = Date()
+        let requestID = UUID(); motorcycleRequestID = requestID
+        isCalculating = true; hasRoute = false; displayPolyline = nil; instructionPreview = []
+        status = "Đang tính tuyến xe máy bằng Valhalla/OpenStreetMap…"
+        motorcycleTask = Task {
+            do {
+                var request = URLRequest(url: URL(string: "https://valhalla1.openstreetmap.de/route")!)
+                request.httpMethod = "POST"; request.timeoutInterval = 30
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("github.com/huydung1232007/huawei-watch-sideload-ios-personal-test", forHTTPHeaderField: "X-Client-Id")
+                request.httpBody = try MotorcycleRoute.request(
+                    origin: .init(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude),
+                    destination: .init(latitude: target.latitude, longitude: target.longitude))
+                let client = URLSession(configuration: .ephemeral)
+                defer { client.invalidateAndCancel() }
+                let (data, response) = try await client.data(for: request)
+                guard self.motorcycleRequestID == requestID, !Task.isCancelled else { return }
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw MotorcycleRoute.RouteError.provider("Máy chủ chưa sẵn sàng. Thử lại sau.") }
+                let result = try MotorcycleRoute.decode(data)
+                let coordinates = result.coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+                let polyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
+                let points = (0..<polyline.pointCount).map { polyline.points()[$0] }
+                let lengths = zip(points, points.dropFirst()).map { $0.0.distance(to: $0.1) }
+                guard let path = RouteProgress(points: points.map { .init(x: $0.x, y: $0.y) }, lengths: lengths) else { throw RouteError.noRoute }
+                self.route = Plan(polyline: polyline, distance: result.distance, expectedTravelTime: result.duration)
+                self.path = path
+                self.maneuvers = result.steps.map { Maneuver(at: path.cumulative[$0.index], instruction: $0.instruction, turn: $0.turn) }
+                self.routeOrigin = location
+                self.displayPolyline = polyline; self.routeRevision = UUID()
+                self.instructionPreview = self.maneuvers.map(\.instruction)
+                self.preview = "\(Self.distance(result.distance)) · khoảng \(max(1, Int(ceil(result.duration / 60)))) phút · Xe máy · OSM"
+                self.hasRoute = true
+                self.status = "Kiểm tra tuyến xe máy và điểm đến, rồi bấm Bắt đầu."
+            } catch {
+                guard self.motorcycleRequestID == requestID else { return }
+                self.status = "Không tính được tuyến xe máy: \(error.localizedDescription)"
+            }
+            if self.motorcycleRequestID == requestID { self.isCalculating = false }
+        }
     }
 
     func start() {
@@ -228,6 +289,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         isNavigating = true
         manager.activityType = mode == .walking ? .fitness : .automotiveNavigation
         manager.pausesLocationUpdatesAutomatically = false
+        manager.distanceFilter = kCLDistanceFilterNone
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         backgroundActivity = CLBackgroundActivitySession()
@@ -255,6 +317,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         fixMonitor?.cancel(); fixMonitor = nil
         manager.allowsBackgroundLocationUpdates = false
         manager.pausesLocationUpdatesAutomatically = true
+        manager.distanceFilter = 5
         if wasNavigating {
             status = reason
             if notifyWatch { onStop?() }
