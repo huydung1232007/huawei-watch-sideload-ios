@@ -114,6 +114,11 @@ final class WatchLink: NSObject, ObservableObject {
         }
         session.onAppMessage = { [weak self] source, data in
             guard let self else { return }
+            // Only the two small startup-message sizes observed from Navigation.
+            // Do not dump arbitrary app payloads into the log.
+            if source == "com.pineapps.navigation.watch", [4, 9].contains(data.count) {
+                self.append(.info, "Navigation RX\(data.count): \(data.hexCompact)")
+            }
             if source == NotificationIcon.watchPackage {
                 self.notificationIconMessage(data)
                 return

@@ -1,16 +1,30 @@
-# GT 2 Pro HiChain Lite experiment — NOT YET BUILT OR DEVICE TESTED
+# GT 2 Pro HiChain Lite experiment
+
+First build: https://github.com/huydung1232007/huawei-watch-sideload-ios/actions/runs/43582919535
+Commit `6c8baf35bb2f69d47a6eaeecdeb292da6b9d4a58` built successfully; all 79 Swift
+tests passed. The user then reported successful installation and pairing, with
+battery/watch information displayed on the GT 2 Pro. This is a user report,
+not independently observed hardware validation.
+
+The actual installed Navigation package reported by the user is
+`com.pineapps.navigation.watch`; it pings `com.pineapps.navigation` and sends 4-byte
+and 9-byte startup messages. Version 1.1.2 (build 4) adds a narrow hexadecimal log
+for those message lengths from that exact package. It does not send invented
+navigation payloads or log arbitrary app data. No navigation decoder is implemented.
 
 Prepared 2026-11-14 against HuaSideload commit `7b725da37daf9dc0c009578bfb9d62d47a283518`.
 The original release 1.1 installed successfully, but the user's watch reports
 `Auth 1, support type 2, AES-CBC` and stops at the unimplemented HiChain Lite branch.
-The security-negotiation auth-type number and auth-algorithm number are not yet known.
+The exact security-negotiation auth-type and auth-algorithm numbers were not provided;
+read them from the new log rather than inferring them from pairing success.
 
 ## Scope
 
 This experiment implements the Gadgetbridge Auth-1 HiChain Lite flow only when
 security negotiation returns type 1 or 2, the link reports support type 2, CBC,
 and algorithm 0 (HMAC) or 1 (PBKDF2). All other Lite combinations remain unsupported.
-It does not implement Mobiteka Navigation or decode its application messages.
+It does not implement Navigation or decode its application messages. The target app
+is Navigation Watch (Prog Apps/PineApps), as identified by the actual package name.
 Minimum iOS remains 17; use the newer iPhone, not the iPhone 7 Plus.
 
 The app reads the server nonce, obtains/uses the PIN, verifies the watch's challenge
@@ -36,9 +50,10 @@ skipped. Do not change Huawei accounts or reset the watch to work around errors.
 - Eight Swift XCTest cases cover both crypto variants, response verification, invalid
   inputs, protocol gating, nonce extraction, IV wrapping, phone identity and bonding.
 - `git diff --check` performed locally.
-- Swift tests have NOT been run: no Swift/Xcode toolchain is installed on this Windows PC.
-- iOS compilation and physical-watch validation have NOT been performed.
-- Do not describe the source patch as a working IPA or a Navigation fix.
+- CI ran 79 tests successfully and compiled the first iOS IPA on macOS. The new
+  diagnostic change is subject to its own CI build before delivery.
+- The user reported successful pairing with the first build; navigation is untested.
+- Do not describe a pairing success as a Navigation fix.
 
 ## Build without a local Mac
 
@@ -51,7 +66,7 @@ No Apple signing credentials are needed for the build. Sideload the resulting IP
 using your own Apple ID only after the build/tests succeed and before a supervised test.
 
 Before installing, check that CI succeeded and that the artifact belongs to the exact
-source commit. The IPA's display name is `HuaSideload Lite Test`, version 1.1.1 build 3.
+source commit. The IPA's display name is `HuaSideload Lite Test`, version 1.1.2 build 4.
 Retain build/test logs and IPA SHA-256 alongside the artifact.
 
 ## Provenance and license
