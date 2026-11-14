@@ -40,10 +40,7 @@ struct NavigationHomeView: View {
 
     private var header: some View {
         HStack(alignment: .center,spacing: 12) {
-            VStack(alignment: .leading,spacing: 3) {
-                Text("Dẫn đường").font(.title.bold())
-                Text("Đi cùng đồng hồ của bạn").font(.caption).foregroundStyle(.secondary)
-            }
+            Text("Dẫn đường").font(.system(size: 26,weight: .bold))
             Spacer(minLength: 4)
             Button(action: connectWatch) {
                 HStack(spacing: 5) {
@@ -61,7 +58,7 @@ struct NavigationHomeView: View {
             }
             .buttonStyle(.plain).accessibilityLabel("Tùy chọn điều hướng")
         }
-        .padding(.horizontal,20).padding(.top,12).padding(.bottom,16)
+        .padding(.horizontal,20).padding(.top,8).padding(.bottom,10)
         .background(.ultraThinMaterial)
     }
 
@@ -111,7 +108,7 @@ struct NavigationHomeView: View {
             } else if !navigator.routeChoices.isEmpty {
                 routeChoices
             }
-            Text(navigator.status).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            Text(navigator.status).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
             if navigator.hasRoute {
                 Button { link.startRouteNavigation() } label: {
                     Label("Bắt đầu hành trình",systemImage: "location.north.fill")
@@ -151,7 +148,8 @@ struct NavigationHomeView: View {
                                 }
                                 Text(route.detail).font(.caption).lineLimit(1)
                                 Text(route.via.isEmpty ? "Xem tuyến trên bản đồ" : route.via)
-                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    .font(.caption).foregroundStyle(Color(.label).opacity(0.72)).lineLimit(2)
+                                    .frame(height: 32,alignment: .topLeading)
                             }
                             .foregroundStyle(.primary).frame(width: 240,alignment: .leading).padding(13)
                             .background(navigator.selectedRouteID == route.id ? Color.blue.opacity(0.09) : Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 16))

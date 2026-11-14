@@ -2,6 +2,9 @@ import SwiftUI
 
 enum RideFormat {
     static func distance(_ meters: Double) -> String { meters < 1000 ? "\(Int(max(0,meters))) m" : String(format: "%.1f km",meters/1000) }
+    static func date(_ value: Date) -> String {
+        value.formatted(Date.FormatStyle(date: .abbreviated,time: .shortened).locale(Locale(identifier: "vi_VN")))
+    }
     static func speed(_ value: Double) -> String { String(format: "%.1f",value) }
     static func duration(_ seconds: Double) -> String {
         let total = max(0,Int(seconds))
@@ -43,7 +46,7 @@ struct TripHistoryView: View {
                                         .background(.blue.opacity(0.08),in: RoundedRectangle(cornerRadius: 12))
                                     VStack(alignment: .leading,spacing: 5) {
                                         Text(trip.destination).font(.headline).lineLimit(1)
-                                        Text(trip.startedAt.formatted(date: .abbreviated,time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                                        Text(RideFormat.date(trip.startedAt)).font(.caption).foregroundStyle(.secondary)
                                         Text("\(RideFormat.distance(trip.distance)) · \(RideFormat.duration(trip.duration))")
                                             .font(.subheadline)
                                         Text(trip.outcomeLabel).font(.caption2).foregroundStyle(trip.outcome == .completed ? Color.green : Color.secondary)
@@ -88,8 +91,8 @@ private struct TripDetailView: View {
                 LabeledContent("Phương tiện",value: trip.mode)
             }
             Section("Thời gian") {
-                LabeledContent("Bắt đầu",value: trip.startedAt.formatted(date: .abbreviated,time: .shortened))
-                LabeledContent("Kết thúc",value: trip.endedAt.formatted(date: .abbreviated,time: .shortened))
+                LabeledContent("Bắt đầu",value: RideFormat.date(trip.startedAt))
+                LabeledContent("Kết thúc",value: RideFormat.date(trip.endedAt))
             }
         }.navigationTitle("Hành trình").navigationBarTitleDisplayMode(.inline)
     }

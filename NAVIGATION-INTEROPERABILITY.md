@@ -209,3 +209,8 @@ rendering; the first Intel run passed the logic suite and device Release build b
 was slow in simulator rendering. Boot and UI-render steps are bounded. New route
 responses also recheck GPS freshness, GPS loss resets deviation confirmation, and
 history read access is retried after the app becomes active/unlocked.
+
+Native Navigation and History screenshots were reviewed after simulator rendering.
+Route road labels needed stronger contrast; the header was reduced to preserve map
+space, road labels now wrap, and trip dates use Vietnamese formatting explicitly.
+A compact, linked OSM credit remains visible on motorcycle route cards.
