@@ -7,6 +7,7 @@ struct FavoritePlacesView: View {
     let captureOnOpen: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var editing: FavoritePlace?
+    @State private var didStartCapture = false
 
     var body: some View {
         NavigationStack {
@@ -70,10 +71,12 @@ struct FavoritePlacesView: View {
             }
             .navigationTitle("Yêu thích").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement:.topBarTrailing) { Button("Xong") { dismiss() } } }
-            .sheet(item:$editing) { place in FavoritePlaceEditor(place:place,favorites:favorites) }
+            .navigationDestination(item:$editing) { place in FavoritePlaceEditor(place:place,favorites:favorites) }
             .onChange(of:navigator.capturedFavorite) { _, place in if let place { editing = place } }
             .onDisappear { navigator.cancelFavoriteGPS() }
             .task {
+                guard !didStartCapture else { return }
+                didStartCapture = true
                 if captureOnOpen { navigator.captureFavoriteGPS() }
                 #if DEBUG && targetEnvironment(simulator)
                 if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "favorite-editor" {
@@ -96,8 +99,7 @@ private struct FavoritePlaceEditor: View {
         _name = State(initialValue:place.name)
     }
     var body: some View {
-        NavigationStack {
-            Form {
+        Form {
                 Section("Tên địa điểm") {
                     TextField("Ví dụ: Nhà, Công ty…",text:$name).submitLabel(.done).onSubmit { save() }
                     Text("Tối đa 60 ký tự.").font(.caption).foregroundStyle(.secondary)
@@ -112,12 +114,11 @@ private struct FavoritePlaceEditor: View {
                     Text("Lưu tên không làm thay đổi tọa độ.").font(.caption).foregroundStyle(.secondary)
                 }
                 if let message = favorites.storageMessage { Section { Text(message).foregroundStyle(.red).font(.footnote) } }
-            }
-            .navigationTitle("Lưu địa điểm").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement:.topBarLeading) { Button("Hủy") { dismiss() } }
-                ToolbarItem(placement:.topBarTrailing) { Button("Lưu",action:save).bold().disabled(name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty) }
-            }
+        }
+        .navigationTitle("Lưu địa điểm").navigationBarTitleDisplayMode(.inline).navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement:.topBarLeading) { Button("Hủy") { dismiss() } }
+            ToolbarItem(placement:.topBarTrailing) { Button("Lưu",action:save).bold().disabled(name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty) }
         }
     }
     private func save() {
