@@ -60,7 +60,9 @@ struct MotorcycleRoute {
             case 1...3: translated = "Khởi hành" + (names.isEmpty ? " theo tuyến" : " theo " + names)
             case 4...6: translated = "Đến điểm đến"
             case 25: translated = "Nhập làn" + (names.isEmpty ? "" : " vào " + names)
-            case 26: translated = "Vào vòng xuyến; ra lối số \(maneuver["roundabout_exit_count"] as? Int ?? 0)"
+            case 26:
+                if let count = maneuver["roundabout_exit_count"] as? Int, count > 0 { translated = "Vào vòng xuyến; ra lối số \(count)" }
+                else { translated = "Vào vòng xuyến — theo tuyến" }
             case 27: translated = "Ra khỏi vòng xuyến" + (names.isEmpty ? "" : " vào " + names)
             default: translated = direction == .unspecified ? text : direction.title + (names.isEmpty ? "" : " vào " + names)
             }

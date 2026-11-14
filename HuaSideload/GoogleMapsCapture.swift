@@ -55,9 +55,6 @@ final class GoogleMapsCapture: NSObject, SCContentSharingPickerObserver, SCStrea
             let bounds = UIScreen.main.bounds
             configuration.width = 1080
             configuration.height = Int(1080 * bounds.height / bounds.width)
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-            configuration.queueDepth = 3
-            configuration.pixelFormat = kCVPixelFormatType_32BGRA
             configuration.capturesAudio = false
             let processor = MapsFrameProcessor { [weak self] reading in
                 Task { @MainActor [weak self] in
@@ -104,7 +101,7 @@ private final class MapsFrameProcessor: NSObject, SCStreamOutput {
         lastFrame = Date()
         autoreleasepool {
             let image = CIImage(cvPixelBuffer: buffer)
-            guard let cgImage = context.createCGImage(image, from: image.extent), cgImage.height > cgImage.width else { receive(nil); return }
+            guard let cgImage = context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB()), cgImage.height > cgImage.width else { receive(nil); return }
             do {
                 let request = VNRecognizeTextRequest()
                 request.recognitionLevel = .accurate
@@ -121,24 +118,22 @@ private final class MapsFrameProcessor: NSObject, SCStreamOutput {
                     return .init(text: candidate.string, x: box.minX, y: 1-box.maxY, width: box.width, height: box.height)
                 }
                 guard let initial = ScreenNavigation.parse(lines) else { receive(nil); return }
-                let arrow = Self.arrow(buffer, near: initial.distanceLine)
+                let arrow = Self.arrow(cgImage, near: initial.distanceLine)
                 receive(ScreenNavigation.parse(lines, arrow: arrow))
             } catch { receive(nil) }
         }
     }
 
-    private static func arrow(_ buffer: CVPixelBuffer, near line: ScreenNavigation.Line) -> PineNavigationWire.Turn? {
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
-        let frameWidth = CVPixelBufferGetWidth(buffer), frameHeight = CVPixelBufferGetHeight(buffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+    private static func arrow(_ image: CGImage, near line: ScreenNavigation.Line) -> PineNavigationWire.Turn? {
+        guard image.bitsPerPixel == 32, image.bitsPerComponent == 8,
+              let data = image.dataProvider?.data, let source = CFDataGetBytePtr(data) else { return nil }
+        let frameWidth = image.width, frameHeight = image.height
+        let bytesPerRow = image.bytesPerRow
         let x0 = Int(Double(frameWidth)*0.02), x1 = Int(Double(frameWidth)*min(0.20,line.x-0.015))
         let y0 = Int(Double(frameHeight)*max(0.035,line.y-0.045))
         let y1 = Int(Double(frameHeight)*min(0.33,line.y+max(0.09,line.height*3)))
         guard x1 > x0+12, y1 > y0+12, x1 <= frameWidth, y1 <= frameHeight else { return nil }
         let width = x1-x0, height = y1-y0
-        let source = base.assumingMemoryBound(to: UInt8.self)
         var mask = [Bool](repeating: false, count: width*height)
         for y in 0..<height { for x in 0..<width {
             let index = (y+y0)*bytesPerRow + (x+x0)*4
