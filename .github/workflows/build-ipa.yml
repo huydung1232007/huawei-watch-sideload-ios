@@ -82,7 +82,7 @@ jobs:
         timeout-minutes: 12
         run: |
           set -o pipefail
-          xcodebuild -project HuaSideload.xcodeproj -target HuaSideload -configuration Debug -sdk iphonesimulator SYMROOT="$PWD/ui-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > ui-build.log 2>&1
+          xcodebuild -project HuaSideload.xcodeproj -target HuaSideload -configuration Debug -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG SYMROOT="$PWD/ui-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > ui-build.log 2>&1
           SIM_ID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; keys=sorted(d,key=lambda k:("iOS-27-0" not in k,k)); candidates=[v for k in keys if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")]; preferred=[v for v in candidates if v["name"]=="iPhone 17"]; print((preferred or candidates)[0]["udid"])')
           xcrun simctl boot "$SIM_ID" || true
           python3 -c 'import subprocess,sys; subprocess.run(["xcrun","simctl","bootstatus",sys.argv[1],"-b"],check=True,timeout=240)' "$SIM_ID"

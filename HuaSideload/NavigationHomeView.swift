@@ -29,7 +29,8 @@ struct NavigationHomeView: View {
             guard let line = navigator.displayPolyline else { return }
             let rect = line.boundingMapRect
             withAnimation(.easeInOut(duration: 0.5)) {
-                camera = .rect(rect.insetBy(dx: -max(1000,rect.width*0.15),dy: -max(1000,rect.height*0.2)))
+                if navigator.isNavigating { camera = .userLocation(followsHeading: true,fallback: .automatic) }
+                else { camera = .rect(rect.insetBy(dx: -max(1000,rect.width*0.15),dy: -max(1000,rect.height*0.2))) }
             }
         }
         .onChange(of: navigator.isNavigating) { _, active in
@@ -68,6 +69,10 @@ struct NavigationHomeView: View {
         VStack(alignment: .leading,spacing: 14) {
             if navigator.isNavigating { activePanel }
             else { planningPanel }
+            if navigator.mode == .motorcycle {
+                Link("Tuyến © OpenStreetMap contributors",destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
         }
         .padding(18)
         .background(.regularMaterial,in: RoundedRectangle(cornerRadius: 28,style: .continuous))
