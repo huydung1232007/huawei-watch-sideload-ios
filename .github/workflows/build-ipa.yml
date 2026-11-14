@@ -3,18 +3,21 @@
 name: Build unsigned IPA
 
 on:
+  push:
+    branches: [hichain-lite-test]
   workflow_dispatch:
     inputs:
       bundle_id:
         description: "Bundle ID (make it unique, e.g. com.yourname.huasideload)"
         required: true
-        default: "com.example.huasideload"
+        default: "com.example.huasideload.lite"
 
 permissions:
   contents: read
 
 jobs:
   build:
+    timeout-minutes: 25
     # Intel image: the arm64 pool behind macos-latest repeatedly had no runner available (builds #7, #8)
     runs-on: macos-15-intel
     steps:
@@ -40,7 +43,7 @@ jobs:
 
       - name: Generate Xcode project
         env:
-          HUASIDELOAD_BUNDLE_ID: ${{ inputs.bundle_id }}
+          HUASIDELOAD_BUNDLE_ID: ${{ inputs.bundle_id || 'com.example.huasideload.lite' }}
           HUASIDELOAD_TEAM_ID: ""
         run: ./generate.sh
 
