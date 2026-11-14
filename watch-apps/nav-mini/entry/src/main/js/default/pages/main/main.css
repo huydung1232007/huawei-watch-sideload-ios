@@ -1,0 +1,18 @@
+.container {
+    width: 454px;
+    height: 454px;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: #000000;
+}
+.title { width: 350px; height: 32px; font-size: 22px; color: #52C8FF; text-align: center; }
+.status { width: 350px; height: 34px; font-size: 22px; color: #67E8B0; text-align: center; }
+.turn { width: 350px; height: 80px; flex-direction: row; justify-content: center; align-items: center; }
+.arrow { width: 65px; height: 76px; font-size: 60px; color: #52C8FF; text-align: center; }
+.distance { width: 265px; height: 76px; font-size: 56px; color: #FFFFFF; text-align: center; }
+.instruction { width: 370px; height: 40px; font-size: 22px; color: #FFFFFF; text-align: center; }
+.summary { width: 360px; height: 34px; font-size: 25px; color: #D5E3F4; text-align: center; }
+.footer { width: 340px; height: 34px; font-size: 23px; color: #D5E3F4; text-align: center; }
+.button { width: 270px; height: 52px; margin-top: 12px; border-radius: 26px; background-color: #1677C8; justify-content: center; align-items: center; }
+.label { width: 250px; height: 38px; font-size: 25px; color: #FFFFFF; text-align: center; }

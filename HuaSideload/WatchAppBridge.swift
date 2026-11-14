@@ -14,6 +14,9 @@ final class WatchAppBridge {
     let watchPackage: String
     // appverify GetAppid: package + "_" + public key of the developer certificate (computed by WatchAppCatalog)
     private let watchFingerprint: String
+    private var sourcePackage: String {
+        watchPackage == NavMiniWire.watchPackage ? NavMiniWire.phonePackage : Self.phonePackage
+    }
 
     // Wear Engine recommends at most 1 KB per message
     static let maxMessageBytes = 1000
@@ -106,7 +109,7 @@ final class WatchAppBridge {
     @discardableResult
     private func deliver(_ data: [UInt8], type: String) async -> Bool {
         do {
-            let reply = try await session.p2p(kind: P2P.Kind.data, source: Self.phonePackage, destination: watchPackage,
+            let reply = try await session.p2p(kind: P2P.Kind.data, source: sourcePackage, destination: watchPackage,
                                               sourceFingerprint: Self.phoneFingerprint, destinationFingerprint: watchFingerprint,
                                               data: data)
             if let code = reply.code, code != P2P.Code.ok {

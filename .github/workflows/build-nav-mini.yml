@@ -1,0 +1,59 @@
+name: Build Nav Mini unsigned watch prototype
+on:
+  push:
+    branches: [hichain-lite-test]
+    paths:
+      - 'watch-apps/nav-mini/**'
+      - 'tools/test-nav-mini.cjs'
+      - 'tools/prepare-nav-mini-sdk.py'
+      - 'tools/build-watch-app.sh'
+      - '.github/workflows/build-nav-mini.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  watch:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '16.20.2'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Test watch protocol and lifecycle
+        run: node tools/test-nav-mini.cjs
+      - name: Download and verify official legacy SDK
+        run: |
+          curl --fail --location --retry 2 --connect-timeout 20 --max-time 600 https://repo.huaweicloud.com/openharmony/os/3.2-Release/L2-SDK-MAC-M1-PUBLIC.tar.gz -o "$RUNNER_TEMP/ohos9.tar.gz"
+          python3 tools/prepare-nav-mini-sdk.py "$RUNNER_TEMP/ohos9.tar.gz" "$RUNNER_TEMP/ohos9"
+      - name: Compile and package unsigned Nav Mini
+        env:
+          HUASIDELOAD_SKIP_SIGN: '1'
+          HUASIDELOAD_LEGACY_IMAGES: '1'
+        run: |
+          export NODE16="$(command -v node)"
+          bash tools/build-watch-app.sh watch-apps/nav-mini debug
+          mkdir -p nav-mini-output
+          cp watch-apps/nav-mini/build/out/unsigned.bin nav-mini-output/NavMini-unsigned.bin
+          shasum -a 256 nav-mini-output/NavMini-unsigned.bin > nav-mini-output/NavMini-unsigned.bin.sha256
+          printf '%s\n' 'UNSIGNED BUILD. Not installable on a retail watch. Requires Huawei debug certificate and watch-specific profile. No signature bypass is included.' > nav-mini-output/READ-ME-FIRST.txt
+          python3 - <<'PY'
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('checker','tools/check-watch-bin.py')
+          checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
+          bundle, errors, notes = checker.check('nav-mini-output/NavMini-unsigned.bin')
+          assert bundle == 'com.huydung1232007.navmini'
+          assert errors == ['not signed (hap-sign-tool sign-app -inForm bin)'],errors
+          print('Package structure valid; only the expected missing-signature check remains.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NavMini-unsigned-prototype
+          path: |
+            nav-mini-output/
+            watch-apps/nav-mini/build/compile.log
