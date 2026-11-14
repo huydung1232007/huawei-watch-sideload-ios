@@ -10,9 +10,11 @@ struct NavigationHomeView: View {
     @State private var settings = false
     @State private var showingFavorites = false
     @State private var captureFavoriteOnOpen = false
+    @State private var selectedPin: SelectedMapPin?
 
     var body: some View {
-        Map(position: $camera) {
+        MapReader { proxy in
+          Map(position: $camera) {
             if !navigator.isNavigating {
                 ForEach(navigator.routeChoices.filter { $0.id != navigator.selectedRouteID }) { choice in
                     MapPolyline(choice.polyline).stroke(.gray.opacity(0.55),lineWidth: 5)
@@ -21,8 +23,20 @@ struct NavigationHomeView: View {
             if let line = navigator.displayPolyline { MapPolyline(line).stroke(.blue,lineWidth: 7) }
             if let place = navigator.destination { Marker(place.name,coordinate: place.item.placemark.coordinate).tint(.orange) }
             UserAnnotation()
+          }
+          .mapControls { MapCompass(); MapUserLocationButton() }
+          .simultaneousGesture(
+            LongPressGesture(minimumDuration:0.65,maximumDistance:12)
+                .simultaneously(with:DragGesture(minimumDistance:0,coordinateSpace:.local))
+                .onEnded { press in
+                    guard press.first == true,let touch = press.second,
+                          !navigator.isNavigating,!navigator.isCalculating,
+                          let coordinate = proxy.convert(touch.startLocation,from:.local),
+                          CLLocationCoordinate2DIsValid(coordinate) else { return }
+                    selectedPin = SelectedMapPin(coordinate:coordinate)
+                }
+          )
         }
-        .mapControls { MapCompass(); MapUserLocationButton() }
         .safeAreaInset(edge: .top,spacing: 0) { header }
         .safeAreaInset(edge: .bottom,spacing: 0) { bottomPanel }
         .sheet(isPresented: $searching) { DestinationSearchView(navigator: navigator) }
@@ -30,9 +44,15 @@ struct NavigationHomeView: View {
         .sheet(isPresented: $showingFavorites) {
             FavoritePlacesView(navigator:navigator,favorites:navigator.favorites,captureOnOpen:captureFavoriteOnOpen)
         }
+        .sheet(item:$selectedPin) { pin in
+            MapPinDestinationView(pin:pin,navigator:navigator,favorites:navigator.favorites)
+        }
         .onAppear {
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("favorite") == true { showingFavorites = true }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "pin" {
+                selectedPin = SelectedMapPin(coordinate:.init(latitude:10.77645,longitude:106.70092))
+            }
             #endif
         }
         .onChange(of: navigator.routeRevision) { _, _ in
@@ -114,6 +134,8 @@ struct NavigationHomeView: View {
                 .padding(13).background(Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 16))
             }
             .buttonStyle(.plain)
+            Label("Nhấn giữ bản đồ để ghim vị trí",systemImage:"hand.tap")
+                .font(.caption2).foregroundStyle(.secondary)
             Picker("Phương tiện",selection: $navigator.mode) {
                 Label("Xe máy",systemImage: "motorcycle").tag(RouteNavigator.Mode.motorcycle)
                 Label("Đi bộ",systemImage: "figure.walk").tag(RouteNavigator.Mode.walking)
@@ -192,6 +214,9 @@ struct NavigationHomeView: View {
                     Text(navigator.distanceToTurn.isEmpty ? "Đang cập nhật…" : navigator.distanceToTurn)
                         .font(.system(.title,design: .rounded,weight: .bold))
                     Text(navigator.instruction).font(.headline).lineLimit(3)
+                    if !navigator.followUpInstruction.isEmpty {
+                        Text(navigator.followUpInstruction).font(.subheadline).foregroundStyle(.blue).lineLimit(2)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -299,6 +324,11 @@ private struct NavigationSettingsView: View {
                 Section {
                     Toggle("Tự đổi tuyến khi đi lệch",isOn: $navigator.autoRerouteEnabled)
                 } footer: { Text("Chỉ tính lại sau khi GPS đủ chính xác và xác nhận lệch tuyến. Cần mạng để lấy tuyến mới. Chọn Xe máy để tránh dùng tuyến Ô tô.") }
+                Section {
+                    Toggle("Nhắc hai chỗ rẽ sát nhau",isOn:$navigator.chainedTurnsEnabled)
+                    Toggle("Tổng km/phút trên đồng hồ",isOn:$navigator.watchTripInfoEnabled)
+                } header: { Label("Nội dung Navigation",systemImage:"text.alignleft") }
+                footer: { Text("Nhắc thao tác tiếp theo khi hai chỗ rẽ cách 10–100 m và bạn đang tới gần chỗ rẽ đầu. Tổng km/phút và giờ đến là ước tính theo tuyến; cách hiện vùng phụ tùy phiên bản Navigation trên đồng hồ. Tắt nếu chữ bị cắt.") }
                 Section {
                     Text(navigator.locationStatus).font(.footnote)
                     Text(link.navigationDeliveryInfo).font(.footnote)

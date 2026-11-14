@@ -40,6 +40,20 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     @Published private(set) var instruction = ""
     @Published private(set) var currentTurn: PineNavigationWire.Turn = .unspecified
     @Published private(set) var distanceToTurn = ""
+    @Published private(set) var followUpInstruction = ""
+    @Published private(set) var remainingTripSummary = ""
+    @Published var chainedTurnsEnabled = UserDefaults.standard.object(forKey:"watchChainedTurnsV1") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(chainedTurnsEnabled,forKey:"watchChainedTurnsV1")
+            if let fix = currentLocation { updateGuidance(fix,force:true) }
+        }
+    }
+    @Published var watchTripInfoEnabled = UserDefaults.standard.object(forKey:"watchTripInfoV1") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(watchTripInfoEnabled,forKey:"watchTripInfoV1")
+            if let fix = currentLocation { updateGuidance(fix,force:true) }
+        }
+    }
     @Published private(set) var isSearching = false
     @Published private(set) var isCalculating = false
     @Published private(set) var isNavigating = false
@@ -251,7 +265,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         route = nil; path = nil; maneuvers = []
         preparedRoutes = []; routeChoices = []; selectedRouteID = nil
         hasRoute = false; displayPolyline = nil; instructionPreview = []; routeOrigin = nil
-        preview = ""; instruction = ""; distanceToTurn = ""
+        preview = ""; instruction = ""; distanceToTurn = ""; followUpInstruction = ""; remainingTripSummary = ""
     }
 
     private func summary(_ plan: Plan) -> String {
@@ -282,7 +296,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         displayPolyline = candidate.plan.polyline; routeRevision = UUID()
         instructionPreview = candidate.maneuvers.map(\.instruction)
         preview = summary(candidate.plan)
-        instruction = ""; distanceToTurn = ""
+        instruction = ""; distanceToTurn = ""; followUpInstruction = ""; remainingTripSummary = ""
         maneuverIndex = 0; progress = 0; lastFixTime = nil; refreshPolicy = GuidanceRefreshPolicy()
         hasRoute = true
     }
@@ -645,23 +659,32 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             stop(reason: "Đã đến điểm đến.", notifyWatch: false, outcome: .completed)
             return
         }
-        status = "Đang điều hướng · còn \(Self.distance(totalRemaining))"
+        let secondsRemaining = route.expectedTravelTime * totalRemaining / path.totalLength
+        remainingTripSummary = WatchGuidancePresentation.summary(meters:totalRemaining,seconds:secondsRemaining) ?? Self.distance(totalRemaining)
+        status = "Đang điều hướng · còn \(remainingTripSummary) · ước tính"
         let formatter = DateFormatter(); formatter.dateFormat = "HH:mm"
-        let eta = formatter.string(from: Date().addingTimeInterval(route.expectedTravelTime * totalRemaining / path.totalLength)) + ";ETA;;"
+        let eta = WatchGuidancePresentation.arrivalField(clock:formatter.string(from:Date().addingTimeInterval(secondsRemaining)),
+            meters:totalRemaining,seconds:secondsRemaining,expanded:watchTripInfoEnabled)
+        let following = maneuverIndex+1 < maneuvers.count ? maneuvers[maneuverIndex+1] : nil
+        let followUp = chainedTurnsEnabled ? WatchGuidancePresentation.followUp(current:next.turn,remaining:remaining,
+            next:following?.turn,gap:following.map { $0.at-next.at }) : ""
         let currentSpeed = location.speed >= 0 ? String(format: "%.0f;km/h", location.speed * 3.6) : ""
         let vibration = turnAlertsEnabled ? alertPolicy.pattern(maneuver: maneuverIndex,turn: next.turn,distance: remaining,
             elapsed: Date().timeIntervalSince(tripStartedAt),eligible: next.at > 20) : nil
         emit(instruction: next.instruction, distance: Self.distance(remaining), turn: next.turn,
-             eta: eta, speed: currentSpeed, force: force || vibration != nil, vibration: vibration ?? "", remainingMeters: remaining)
+             eta: eta, speed: currentSpeed, force: force || vibration != nil, vibration: vibration ?? "", remainingMeters: remaining,followUp:followUp)
     }
 
     private func emit(instruction: String, distance: String, turn: PineNavigationWire.Turn,
-                      eta: String = "", speed: String = "", force: Bool, vibration: String = "", remainingMeters: Double? = nil) {
+                      eta: String = "", speed: String = "", force: Bool, vibration: String = "", remainingMeters: Double? = nil,followUp: String = "") {
         self.instruction = instruction; distanceToTurn = distance; currentTurn = turn
-        let key = "\(maneuverIndex)|\(turn.rawValue)|\(instruction)"
+        followUpInstruction = followUp
+        if turn == .unspecified || turn == .destination { remainingTripSummary = "" }
+        let watchInstruction = WatchGuidancePresentation.instruction(instruction,followUp:followUp)
+        let key = "\(maneuverIndex)|\(turn.rawValue)|\(watchInstruction)"
         guard refreshPolicy.shouldSend(key: key,distance: remainingMeters,now: ProcessInfo.processInfo.systemUptime,force: force) else { return }
         do {
-            let data = try PineNavigationWire.guidance(instruction: instruction, distance: distance, turn: turn, eta: eta, speed: speed, vibration: vibration)
+            let data = try PineNavigationWire.guidance(instruction: watchInstruction, distance: distance, turn: turn, eta: eta, speed: speed, vibration: vibration)
             onGuidance?(data,!vibration.isEmpty)
         } catch { status = "Không mã hóa được chỉ dẫn: \(error)" }
     }
@@ -699,6 +722,14 @@ extension RouteNavigator {
         hasLocation = true; locationStatus = "GPS sẵn sàng"
         history.prepareVisualPreview()
         favorites.prepareVisualPreview()
+        if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "guidance" {
+            instruction = "Rẽ trái vào Nguyễn Trãi"; currentTurn = .left; distanceToTurn = "120 m"
+            followUpInstruction = "Sau đó rẽ phải sau 60 m"; remainingTripSummary = "3.2km · 9ph"
+            status = "Dữ liệu minh họa · còn 3.2km · khoảng 9 phút"
+            liveTrip = TripRecord(id:UUID(),startedAt:Date().addingTimeInterval(-600),endedAt:Date(),
+                destination:"Điểm đến minh họa",mode:"Xe máy",distance:2312,outcome:.active)
+            isNavigating = true
+        }
     }
 }
 #endif
