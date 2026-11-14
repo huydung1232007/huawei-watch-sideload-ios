@@ -42,6 +42,13 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     @Published private(set) var distanceToTurn = ""
     @Published private(set) var followUpInstruction = ""
     @Published private(set) var remainingTripSummary = ""
+    @Published var followingManeuverEnabled = UserDefaults.standard.object(forKey:"watchFollowingManeuverV1") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(followingManeuverEnabled,forKey:"watchFollowingManeuverV1")
+            if !followingManeuverEnabled { followingManeuverPolicy.reset() }
+            if let fix = currentLocation { updateGuidance(fix,force:true) }
+        }
+    }
     @Published var chainedTurnsEnabled = UserDefaults.standard.object(forKey:"watchChainedTurnsV1") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(chainedTurnsEnabled,forKey:"watchChainedTurnsV1")
@@ -114,6 +121,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private var lastFixTime: Date?
     private var refreshPolicy = GuidanceRefreshPolicy()
     private var alertPolicy = TurnAlertPolicy()
+    private var followingManeuverPolicy = FollowingManeuverPolicy()
     private var reroutePolicy = ReroutePolicy()
     private var tripAccumulator: TripAccumulator?
     private var lastCheckpoint = Date.distantPast
@@ -262,6 +270,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     private func discardRoutes() {
+        followingManeuverPolicy.reset()
         route = nil; path = nil; maneuvers = []
         preparedRoutes = []; routeChoices = []; selectedRouteID = nil
         hasRoute = false; displayPolyline = nil; instructionPreview = []; routeOrigin = nil
@@ -290,6 +299,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     private func applyRoute(_ candidate: PreparedRoute) {
+        followingManeuverPolicy.reset()
         selectedRouteID = candidate.id
         route = candidate.plan; path = candidate.path; maneuvers = candidate.maneuvers
         routeOrigin = candidate.origin
@@ -515,6 +525,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
         maneuverIndex = 0; progress = 0; lastFixTime = nil
         refreshPolicy = GuidanceRefreshPolicy()
+        followingManeuverPolicy.reset()
         tripStartedAt = Date(); navigationSession = UUID()
         alertPolicy = TurnAlertPolicy(); reroutePolicy = ReroutePolicy()
         tripAccumulator = TripAccumulator(startedAt: tripStartedAt,destination: destination?.name ?? "Điểm đến",mode: mode.title,walking: mode == .walking)
@@ -550,6 +561,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     func stop(reason: String = "Đã dừng điều hướng.", notifyWatch: Bool = true, outcome: TripRecord.Outcome = .stopped) {
+        followingManeuverPolicy.reset()
         let wasNavigating = isNavigating
         isNavigating = false
         navigationSession = UUID(); rerouteTask?.cancel(); rerouteTask = nil
@@ -669,7 +681,14 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         let following = maneuverIndex+1 < maneuvers.count ? maneuvers[maneuverIndex+1] : nil
         let followUp = chainedTurnsEnabled ? WatchGuidancePresentation.followUp(current:next.turn,remaining:remaining,
             next:following?.turn,gap:following.map { $0.at-next.at }) : ""
-        let currentSpeed = location.speed >= 0 ? String(format: "%.0f;km/h", location.speed * 3.6) : ""
+        let afterFollowing = maneuverIndex+2 < maneuvers.count ? maneuvers[maneuverIndex+2] : nil
+        let showFollowing = followingManeuverPolicy.shouldShow(maneuver:maneuverIndex,current:next.turn,
+            remaining:remaining,enabled:followingManeuverEnabled)
+        let straightLength: Double?
+        if let following,let afterFollowing { straightLength = afterFollowing.at-following.at }
+        else { straightLength = nil }
+        let currentSpeed = WatchGuidancePresentation.speedField(metersPerSecond:location.speed,
+            next:following?.turn,gap:following.map { $0.at-next.at },straightLength:straightLength,showFollowing:showFollowing)
         let vibration = turnAlertsEnabled ? alertPolicy.pattern(maneuver: maneuverIndex,turn: next.turn,distance: remaining,
             elapsed: Date().timeIntervalSince(tripStartedAt),eligible: next.at > 20) : nil
         emit(instruction: next.instruction, distance: Self.distance(remaining), turn: next.turn,
@@ -680,7 +699,10 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
                       eta: String = "", speed: String = "", force: Bool, vibration: String = "", remainingMeters: Double? = nil,followUp: String = "") {
         self.instruction = instruction; distanceToTurn = distance; currentTurn = turn
         followUpInstruction = followUp
-        if turn == .unspecified || turn == .destination { remainingTripSummary = "" }
+        if turn == .unspecified || turn == .destination {
+            remainingTripSummary = ""
+            followingManeuverPolicy.reset()
+        }
         let watchInstruction = WatchGuidancePresentation.instruction(instruction,followUp:followUp)
         let key = "\(maneuverIndex)|\(turn.rawValue)|\(watchInstruction)"
         guard refreshPolicy.shouldSend(key: key,distance: remainingMeters,now: ProcessInfo.processInfo.systemUptime,force: force) else { return }

@@ -326,9 +326,10 @@ private struct NavigationSettingsView: View {
                 } footer: { Text("Chỉ tính lại sau khi GPS đủ chính xác và xác nhận lệch tuyến. Cần mạng để lấy tuyến mới. Chọn Xe máy để tránh dùng tuyến Ô tô.") }
                 Section {
                     Toggle("Nhắc hai chỗ rẽ sát nhau",isOn:$navigator.chainedTurnsEnabled)
+                    Toggle("Hướng sau chỗ rẽ ở ô tốc độ",isOn:$navigator.followingManeuverEnabled)
                     Toggle("Tổng km/phút trên đồng hồ",isOn:$navigator.watchTripInfoEnabled)
                 } header: { Label("Nội dung Navigation",systemImage:"text.alignleft") }
-                footer: { Text("Nhắc thao tác tiếp theo khi hai chỗ rẽ cách 10–100 m và bạn đang tới gần chỗ rẽ đầu. Ô phụ luân phiên tổng km và thời gian còn lại khoảng mỗi 5 giây khi có cập nhật GPS. Giờ đến và thời gian là ước tính theo tuyến.") }
+                footer: { Text("Dưới 100 m trước chỗ quẹo, ô tốc độ hiện bước sau đó: hướng rẽ và khoảng cách giữa hai chỗ rẽ, hoặc ↑ cùng chiều dài đoạn đi thẳng kế tiếp. Giữ đến khi GPS xác nhận qua chỗ quẹo, rồi trở lại tốc độ nếu chưa gần chỗ quẹo mới. Nhắc hai chỗ rẽ sát nhau vẫn áp dụng cho các chỗ rẽ cách 10–100 m. Tổng km/phút vẫn luân phiên khoảng mỗi 5 giây khi có cập nhật GPS; thời gian là ước tính theo tuyến.") }
                 Section {
                     Text(navigator.locationStatus).font(.footnote)
                     Text(link.navigationDeliveryInfo).font(.footnote)

@@ -214,3 +214,28 @@ Native Navigation and History screenshots were reviewed after simulator renderin
 Route road labels needed stronger contrast; the header was reduced to preserve map
 space, road labels now wrap, and trip dates use Vietnamese formatting explicitly.
 A compact, linked OSM credit remains visible on motorcycle route cards.
+
+
+## Following maneuver in the speed field (1.3.3 build 17)
+
+Below 100 m before a primary left/right/U-turn, a separate default-on setting
+replaces the speed value/unit slots with the immediate following maneuver's
+arrow and a compact distance. Example: primary right at 30 m, then left 60 m
+after it, sends p=normal_right_16.png, d=30 m and s=←;60m. A straight
+following step uses ↑ and that step's own length up to the next maneuver,
+not the gap to its start. Long distances use km, including ↑;2km.
+
+The hint latches for the current maneuver after entry below 100 m, so GPS jitter
+above the threshold does not briefly restore speed. It resets on maneuver change,
+route change, stopping, disabling the setting, and GPS/off-route/reroute warnings.
+The existing GPS progress rule confirms a passed maneuver; no time-based
+advancement, prediction, new timer, provider change or extra vibration is added.
+If the next maneuver is unknown, missing or the destination, or its distance is
+invalid, speed remains visible. No intermediate maneuver is skipped or inferred.
+A short following maneuver may immediately qualify after the current turn.
+
+The primary arrow/instruction/distance/haptic remain current. Existing adjacent-
+turn text and the confirmed alternating total km/minute field are preserved.
+This is an interoperability experiment: a P2P ACK does not prove arrow glyphs
+or the unit caption render correctly in this watch client's speed field. Device
+confirmation is required. Native Nav Mini development remains paused.
