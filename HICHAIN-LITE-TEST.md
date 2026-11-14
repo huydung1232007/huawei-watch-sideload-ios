@@ -10,7 +10,9 @@ The actual installed Navigation package reported by the user is
 `com.pineapps.navigation.watch`; it pings `com.pineapps.navigation` and sends 4-byte
 and 9-byte startup messages. Version 1.1.2 (build 4) adds a narrow hexadecimal log
 for those message lengths from that exact package. It does not send invented
-navigation payloads or log arbitrary app data. No navigation decoder is implemented.
+navigation payloads or log arbitrary app data. Version 1.1.3 (build 5) adds the
+independent Navigation Watch protocol encoder and display DEMO described in
+`NAVIGATION-INTEROPERABILITY.md`; real route calculation is not implemented yet.
 
 Prepared 2026-11-14 against HuaSideload commit `7b725da37daf9dc0c009578bfb9d62d47a283518`.
 The original release 1.1 installed successfully, but the user's watch reports
@@ -66,7 +68,7 @@ No Apple signing credentials are needed for the build. Sideload the resulting IP
 using your own Apple ID only after the build/tests succeed and before a supervised test.
 
 Before installing, check that CI succeeded and that the artifact belongs to the exact
-source commit. The IPA's display name is `HuaSideload Lite Test`, version 1.1.2 build 4.
+source commit. The IPA's display name is `HuaSideload Lite Test`, version 1.1.3 build 5.
 Retain build/test logs and IPA SHA-256 alongside the artifact.
 
 ## Provenance and license

@@ -37,6 +37,7 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var watchAppProgress: Double?
     @Published private(set) var installedApps: [WatchApps.Installed] = []
     @Published private(set) var watchUDID: String?
+    @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
     // Identity details (UDID, serial number, MAC) stay hidden on screen and in the log, e.g. while filming
     @Published var revealIdentity = false
     private var secrets: [String] = []
@@ -114,10 +115,18 @@ final class WatchLink: NSObject, ObservableObject {
         }
         session.onAppMessage = { [weak self] source, data in
             guard let self else { return }
-            // Only the two small startup-message sizes observed from Navigation.
-            // Do not dump arbitrary app payloads into the log.
-            if source == "com.pineapps.navigation.watch", [4, 9].contains(data.count) {
-                self.append(.info, "Navigation RX\(data.count): \(data.hexCompact)")
+            if source == PineNavigationWire.watchPackage {
+                if let control = PineNavigationWire.control(data) {
+                    switch control {
+                    case .ping: self.navigationStatus = "Navigation đang chờ chỉ dẫn."
+                    case .initialize: self.navigationStatus = "Navigation đã mở trên đồng hồ."
+                    case .exit: self.navigationStatus = "Navigation đã đóng trên đồng hồ."
+                    }
+                    self.append(.info, "Navigation control: \(control.rawValue)")
+                } else {
+                    self.append(.info, "Navigation: received \(data.count) bytes (unrecognised message)")
+                }
+                return
             }
             if source == NotificationIcon.watchPackage {
                 self.notificationIconMessage(data)
@@ -312,6 +321,7 @@ final class WatchLink: NSObject, ObservableObject {
         faceConfirms.removeAll()
         connectedName = nil
         battery = nil
+        navigationStatus = "Mở Navigation trên đồng hồ để kiểm tra."
         watchInfo = []
         servicesAwaitingCharacteristics = 0
         parser.reset()
@@ -319,6 +329,44 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     // MARK: - Watch commands
+
+    func sendNavigationDemo(_ turn: PineNavigationWire.Turn) {
+        guard isPaired else { return }
+        run("Sending Navigation demo") { session in
+            self.navigationStatus = "Đang gửi chỉ dẫn mẫu…"
+            do {
+                try await self.navigationSend(PineNavigationWire.start, session: session)
+                try await self.navigationSend(try PineNavigationWire.demonstration(turn), session: session)
+                self.navigationStatus = "Đồng hồ đã xác nhận nhận dữ liệu mẫu. Kiểm tra màn hình đồng hồ."
+            } catch {
+                self.navigationStatus = "Gửi mẫu thất bại: \(error)"
+                throw error
+            }
+        }
+    }
+
+    func stopNavigationDemo() {
+        guard isPaired else { return }
+        run("Stopping Navigation demo") { session in
+            do {
+                try await self.navigationSend(PineNavigationWire.stop, session: session)
+                self.navigationStatus = "Đã gửi lệnh dừng mẫu."
+            } catch {
+                self.navigationStatus = "Dừng mẫu thất bại: \(error)"
+                throw error
+            }
+        }
+    }
+
+    private func navigationSend(_ data: [UInt8], session: HuaweiSession) async throws {
+        let reply = try await session.p2p(kind: P2P.Kind.data,
+            source: PineNavigationWire.phonePackage, destination: PineNavigationWire.watchPackage,
+            sourceFingerprint: PineNavigationWire.phoneFingerprint,
+            destinationFingerprint: PineNavigationWire.watchFingerprint, data: data)
+        guard reply.code == P2P.Code.ok else {
+            throw HuaweiAuthError.watchError("Navigation P2P result: \(reply.code.map(String.init) ?? "missing ACK code")")
+        }
+    }
 
     func pair() {
         guard let watchKey else { return }
