@@ -23,12 +23,16 @@ struct ContentView: View {
     private var filmModeOffered: Bool { link.features.contains { $0.offersFilmMode } }
     private var filmMode: Bool { filmModeOffered && filmModeOn }
 
-    enum Tab: Hashable { case watch, install, features, log }
-    @State private var tab: Tab = .watch
+    enum Tab: Hashable { case navigation, history, watch, extras }
+    @State private var tab: Tab = .navigation
 
     var body: some View {
         TabView(selection: $tab) {
-            page(AppInfo.displayName) {
+            NavigationHomeView(navigator: link.routeNavigator,link: link,connectWatch: { tab = .watch })
+                .tabItem { Label("Dẫn đường",systemImage: "location.north.fill") }.tag(Tab.navigation)
+            TripHistoryView(history: link.routeNavigator.history)
+                .tabItem { Label("Lịch sử",systemImage: "clock.arrow.circlepath") }.tag(Tab.history)
+            page("Đồng hồ") {
                 statusSection
                 if link.connectedName == nil && !link.isConnecting {
                     devicesSection
@@ -45,46 +49,35 @@ struct ContentView: View {
                     }
                 }
             }
-            .tabItem { Label(L("Watch", "Saat"), systemImage: "watch.analog") }
+            .tabItem { Label("Đồng hồ", systemImage: "applewatch") }
             .tag(Tab.watch)
 
-            page(L("Install", "Yükle")) {
+            page("Tiện ích") {
+                Section {
+                    NavigationLink {
+                        List { logSection }.navigationTitle("Nhật ký kết nối")
+                    } label: { Label("Nhật ký kết nối",systemImage: "list.bullet.rectangle") }
+                }
                 if link.isPaired {
                     watchAppsSection
                     watchFaceSection
                     if !filmMode { musicSection }
-                } else {
-                    pairFirstSection
-                }
-            }
-            .tabItem { Label(L("Install", "Yükle"), systemImage: "square.and.arrow.down") }
-            .tag(Tab.install)
-
-            page(L("Features", "Özellikler")) {
-                if link.isPaired {
-                    NavigationRouteSection(navigator: link.routeNavigator, link: link)
                     WatchSpeakerSection(speaker: link.speaker)
-                    // Feature sections (navigation, remote control etc.); never in filming mode
                     if !filmMode {
-                        ForEach(link.features.indices, id: \.self) { index in
-                            link.features[index].sections()
-                        }
+                        ForEach(link.features.indices,id: \.self) { index in link.features[index].sections() }
                     }
-                } else {
-                    pairFirstSection
-                }
+                } else { pairFirstSection }
             }
-            .tabItem { Label(L("Features", "Özellikler"), systemImage: "sparkles") }
-            .tag(Tab.features)
-
-            page(L("Log", "Log")) {
-                logSection
-            }
-            .tabItem { Label(L("Log", "Log"), systemImage: "list.bullet.rectangle") }
-            .tag(Tab.log)
+            .tabItem { Label("Tiện ích",systemImage: "square.grid.2x2") }.tag(Tab.extras)
         }
+        .tint(.blue)
         // While filming, identities (UDID, serial number, MAC) always stay masked, in the log too
-        .onAppear { if filmMode { link.revealIdentity = false } }
+         .onAppear {
+            if filmMode { link.revealIdentity = false }
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "history" { tab = .history }
+            #endif
+        }
         .onChange(of: filmMode) { _, on in if on { link.revealIdentity = false } }
     }
 

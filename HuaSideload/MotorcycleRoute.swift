@@ -22,12 +22,12 @@ struct MotorcycleRoute {
         }
     }
 
-    static func request(origin: Coordinate, destination: Coordinate) throws -> Data {
+    static func request(origin: Coordinate, destination: Coordinate, alternatives: Bool = true) throws -> Data {
         guard [origin, destination].allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }) else { throw RouteError.invalid }
         return try JSONSerialization.data(withJSONObject: [
             "locations": [["lat": origin.latitude, "lon": origin.longitude], ["lat": destination.latitude, "lon": destination.longitude]],
             "costing": "motorcycle", "costing_options": ["motorcycle": ["use_highways": 0, "use_tolls": 0, "use_trails": 0]],
-            "units": "kilometers", "language": "en-US", "alternates": 2
+            "units": "kilometers", "language": "en-US", "alternates": alternatives ? 2 : 0
         ])
     }
 

@@ -42,8 +42,8 @@ final class WatchLink: NSObject, ObservableObject {
     private var navigationPeer: PineNavigationWire.PeerIdentity?
     private var navigationIsOpen = false
     let routeNavigator = RouteNavigator()
-    private var pendingRouteData: [UInt8]?
-    private var pendingRouteStop = false
+    private var routeOutbox = NavigationOutbox()
+    private var routeContentGeneration = 0
     private var routeDelivery: Task<Void, Never>?
     private var routeDeliveryGeneration = 0
     private var routeChanges: AnyCancellable?
@@ -95,7 +95,11 @@ final class WatchLink: NSObject, ObservableObject {
         features = WatchFeatures.load()
         super.init()
         routeChanges = routeNavigator.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
-        routeNavigator.onGuidance = { [weak self] data in self?.queueRouteGuidance(data) }
+        routeNavigator.onGuidance = { [weak self] data, alert in self?.queueRouteGuidance(data,isAlert: alert) }
+        routeNavigator.onRouteReset = { [weak self] in
+            guard let self else { return }
+            self.routeOutbox.clear(); self.routeContentGeneration &+= 1
+        }
         routeNavigator.onStop = { [weak self] in self?.queueRouteStop() }
         speaker.log = { [weak self] kind, text in self?.append(kind, text) }
         session = HuaweiSession(
@@ -140,7 +144,7 @@ final class WatchLink: NSObject, ObservableObject {
                     case .exit:
                         self.navigationIsOpen = false
                         self.navigationStatus = "Navigation đã đóng trên đồng hồ."
-                        self.pendingRouteData = nil
+                        self.routeOutbox.clear()
                         self.routeNavigator.stop(reason: "Navigation đã đóng trên đồng hồ. Mở lại rồi bấm Bắt đầu.", notifyWatch: false)
                     }
                     self.append(.info, "Navigation control: \(control.rawValue)")
@@ -174,6 +178,13 @@ final class WatchLink: NSObject, ObservableObject {
                + (WatchAppCatalog.all.isEmpty ? L("none", "yok") : WatchAppCatalog.all.map(\.name).joined(separator: ", ")))
         // State restoration: if iOS terminates the app in the background, it keeps the (pending) connection to the
         // watch and relaunches the app for its Bluetooth events, so notifications and the watch's buttons keep working
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] != nil {
+            isPaired = true; connectedName = "HUAWEI WATCH GT 2 Pro"; battery = 78; pairingStage = .paired
+            routeNavigator.prepareVisualPreview()
+            return
+        }
+        #endif
         central = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionRestoreIdentifierKey: "HuaSideloadCentral"])
     }
 
@@ -345,7 +356,7 @@ final class WatchLink: NSObject, ObservableObject {
         routeDeliveryGeneration &+= 1
         routeDelivery?.cancel(); routeDelivery = nil
         if busy == "Sending route guidance" { busy = nil }
-        pendingRouteData = nil; pendingRouteStop = false
+        routeOutbox.clear(); routeContentGeneration &+= 1
         bridges.values.forEach { $0.reset() }
         features.forEach { $0.connectionLost() }
         writeCharacteristic = nil
@@ -372,20 +383,29 @@ final class WatchLink: NSObject, ObservableObject {
         routeNavigator.start()
     }
 
-    private func queueRouteGuidance(_ data: [UInt8]) {
+    func testTurnHaptic(_ turn: PineNavigationWire.Turn) {
+        guard isPaired, !commandsLocked else { return }
+        do {
+            let data = try PineNavigationWire.guidance(instruction: "Kiểm tra rung · " + turn.title,distance: "",turn: turn,
+                vibration: turn == .left ? "L" : "R")
+            queueRouteGuidance(data,isAlert: true)
+        } catch { navigationStatus = "Chưa gửi được lệnh rung: \(error)" }
+    }
+
+    private func queueRouteGuidance(_ data: [UInt8], isAlert: Bool = false) {
         guard isPaired else {
             routeNavigator.deliveryFailed("Chưa kết nối với đồng hồ.")
             return
         }
-        pendingRouteStop = false
-        pendingRouteData = data // Keep only the newest GPS update while awaiting an ACK.
+        routeOutbox.enqueue(data,isAlert: isAlert)
         drainRouteMessages()
     }
 
     private func queueRouteStop() {
-        pendingRouteData = nil
+        routeContentGeneration &+= 1
+        routeOutbox.clear()
         guard isPaired else { return }
-        pendingRouteStop = true
+        routeOutbox.stop()
         drainRouteMessages()
     }
 
@@ -414,27 +434,30 @@ final class WatchLink: NSObject, ObservableObject {
                     if self.busy == label { self.busy = nil }
                 }
             }
-            while self.pendingRouteStop || self.pendingRouteData != nil {
+            while self.routeOutbox.hasPending {
                 while self.busy != nil && !Task.isCancelled {
                     do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                 }
                 guard !Task.isCancelled, self.routeDeliveryGeneration == generation, self.isPaired else { return }
-                let stopping = self.pendingRouteStop
-                let data = stopping ? PineNavigationWire.stop : self.pendingRouteData
-                self.pendingRouteData = nil; self.pendingRouteStop = false
-                guard let data else { continue }
+                guard let packet = self.routeOutbox.next() else { continue }
+                let stopping = packet.isStop, data = packet.data
+                let contentGeneration = self.routeContentGeneration
                 self.busy = label
                 do {
                     if !stopping && !self.navigationIsOpen {
                         try await self.navigationSend(PineNavigationWire.start, session: self.session, label: "route start")
                     }
                     guard !Task.isCancelled, self.routeDeliveryGeneration == generation else { return }
+                    if contentGeneration != self.routeContentGeneration {
+                        if self.busy == label { self.busy = nil }
+                        continue
+                    }
                     try await self.navigationSend(data, session: self.session, label: stopping ? "route stop" : "route guidance")
                     guard !Task.isCancelled, self.routeDeliveryGeneration == generation else { return }
                     self.navigationStatus = stopping ? "Đã gửi lệnh dừng điều hướng." : "Đồng hồ đã xác nhận nhận chỉ dẫn."
                 } catch {
                     guard self.routeDeliveryGeneration == generation else { return }
-                    self.pendingRouteData = nil; self.pendingRouteStop = false
+                    self.routeOutbox.clear()
                     self.navigationStatus = "Gửi chỉ dẫn thất bại: \(error)"
                     self.append(.error, self.navigationStatus)
                     self.routeNavigator.deliveryFailed(String(describing: error))

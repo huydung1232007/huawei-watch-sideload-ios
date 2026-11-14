@@ -14,7 +14,8 @@ let package = Package(
             sources: ["HiChainJSON.swift", "HuaweiProtocol.swift", "Localization.swift", "PairingSetup.swift",
                       "WatchFaceSupport.swift", "WatchFacePackage.swift", "CredentialStore.swift", "HWTAnalyzer.swift",
                       "HuaweiAuth.swift", "HiChainLite.swift", "P2P.swift", "PineNavigationWire.swift",
-                      "RouteProgress.swift", "RouteInstruction.swift", "MotorcycleRoute.swift"]
+                      "RouteProgress.swift", "RouteInstruction.swift", "MotorcycleRoute.swift",
+                      "NavigationPolicy.swift", "TripRecord.swift"]
         ),
         .testTarget(
             name: "HuaSideloadParsingTests",

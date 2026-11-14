@@ -98,3 +98,8 @@ at the user's request and adds alternate-route selection on the Apple map. Map
 search/display is Apple; motorcycle routes remain Valhalla/OpenStreetMap. The user
 confirmed the 1.1.6 Apple-map route mode works; the new route selection still needs
 physical confirmation. See the final section of NAVIGATION-INTEROPERABILITY.md.
+
+
+Current planned build: 1.1.8 build 10 adds turn-alert/rerouting/history behavior and
+a navigation-first interface. New behavior is unit-tested and built in CI; actual
+GT 2 Pro haptics and background rerouting still require device-side confirmation.

@@ -66,12 +66,15 @@ enum PineNavigationWire {
     }
 
     static func guidance(instruction: String, distance: String, turn: Turn,
-                         eta: String = "", speed: String = "") throws -> [UInt8] {
+                         eta: String = "", speed: String = "", vibration: String = "") throws -> [UInt8] {
+        guard ["", "L", "R", "S", "confirmation", "nudge"].contains(vibration) else {
+            throw HuaweiAuthError.unexpected("Unsupported navigation vibration pattern")
+        }
         // Huawei's phone companion stringifies all compact-field values.
         let fields: [String: String] = [
             "i": String(instruction.prefix(180)), "d": String(distance.prefix(40)), "p": turn.icon,
             "e": String(eta.prefix(80)), "s": String(speed.prefix(40)),
-            "f": "1", "o": "1", "v": "",
+            "f": "1", "o": "1", "v": vibration,
             "ic": "16777215", "dc": "16777215", "ec": "16777215",
             "sc": "16777215", "cc": "16777215", "pc": "16777215", "bc": "0"
         ]

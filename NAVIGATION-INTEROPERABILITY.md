@@ -159,3 +159,47 @@ The user also requested removing the Navigation Watch display-test block. The DE
 section, sample send/stop methods and demonstration payload helper are removed in
 this build. Its dedicated demo-only test is removed; real guidance/protocol tests
 remain. Navigation is now entered through the Apple-map route-selection section.
+
+
+## Navigation companion redesign (1.1.8 build 10)
+
+User requested features 1/2/5: turn haptics, automatic rerouting and trip history,
+then asked for a more attractive/convenient app. Navigation is now the first tab,
+with an Apple map, connected-watch/battery pill, destination sheet, mode selector,
+route cards and a large Start button. During navigation the bottom card shows the
+next instruction/distance, live trip statistics, Recalculate and End. History has
+its own tab; pairing and advanced tools/logs remain accessible separately.
+
+Turn alerts use independently implemented interface tokens observed in the local
+Android companion: v = L/R/S (confirmation/nudge are also known values). No private
+Android code/assets are redistributed. Alerts fire once per maneuver near 200 m
+and 50 m, skip departure/destination and the first eight seconds, and have a four-
+second minimum gap. A near-zone first observation consumes the earlier alert too.
+Ordinary BLE distance updates cannot overwrite a queued alert; stop/reroute clears
+old queued instructions. The settings sheet contains an on/off toggle and left/
+right haptic checks. Physical vibration behavior on the user's GT 2 Pro is still
+unverified; a P2P acknowledgement is not evidence of felt vibration.
+
+Automatic rerouting needs accurate GPS (<=35 m), multiple out-of-route fixes over
+at least eight seconds, and only one request at a time. Motorcycle mode remains
+motorcycle, requests one new route and applies the existing highway/mode checks.
+Success has a 30-second cooldown. Failures back off 60/120/180 seconds; after three
+failures the user must explicitly retry. Stop/disconnect invalidates in-flight
+route responses so late responses cannot restart a trip. Rerouting changes route
+geometry/maneuvers while preserving the same trip's statistics. GPS remains active
+in the already authorized location background mode; device behavior needs testing.
+
+Trip history records destination name, mode, start/end, estimated GPS distance,
+elapsed time, average speed and completion state. It stores NO GPS track/coordinates.
+Low-quality points, implausible jumps, stationary fixes and long GPS gaps are not
+joined into mileage. Statistics are estimates. A checkpoint is saved about every
+30 seconds; an unfinished checkpoint becomes an interrupted record at next launch.
+Local JSON is written atomically in the app sandbox with iOS protection usable
+after first unlock, and excluded from backup. No history is uploaded to GitHub or
+routing servers. Routing requests still send their required endpoints to providers.
+Existing unreadable history is not overwritten; delete actions are explicit UI actions.
+
+CI additionally builds a simulator DEBUG app with synthetic public-landmark preview
+data to capture Navigation/History screenshots for visual review. Preview data is
+excluded from device Release builds and does not access any user watch/location.
+The original Google capture and display-demo functionality remain removed.
