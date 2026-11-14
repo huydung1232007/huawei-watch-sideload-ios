@@ -5,6 +5,15 @@ name: Build unsigned IPA
 on:
   push:
     branches: [hichain-lite-test]
+    paths:
+      - 'HuaSideload/**'
+      - 'Tests/**'
+      - 'WatchApps/**'
+      - 'Package.swift'
+      - 'project.yml'
+      - 'generate.sh'
+      - 'Config/**'
+      - '.github/workflows/build-ipa.yml'
   workflow_dispatch:
     inputs:
       bundle_id:

@@ -6,6 +6,7 @@ on:
       - 'watch-apps/nav-mini/**'
       - 'tools/test-nav-mini.cjs'
       - 'tools/prepare-nav-mini-sdk.py'
+      - 'tools/download-nav-mini-sdk.py'
       - 'tools/build-watch-app.sh'
       - '.github/workflows/build-nav-mini.yml'
   workflow_dispatch:
@@ -26,10 +27,31 @@ jobs:
           java-version: '17'
       - name: Test watch protocol and lifecycle
         run: node tools/test-nav-mini.cjs
+      - uses: actions/cache/restore@v4
+        id: sdk-cache
+        with:
+          path: ${{ runner.temp }}/ohos9
+          key: navmini-ohos9-arm64-42444ed280e6-v1
       - name: Download and verify official legacy SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          curl --fail --location --retry 2 --connect-timeout 20 --max-time 600 https://repo.huaweicloud.com/openharmony/os/3.2-Release/L2-SDK-MAC-M1-PUBLIC.tar.gz -o "$RUNNER_TEMP/ohos9.tar.gz"
+          python3 tools/download-nav-mini-sdk.py "$RUNNER_TEMP/ohos9.tar.gz"
           python3 tools/prepare-nav-mini-sdk.py "$RUNNER_TEMP/ohos9.tar.gz" "$RUNNER_TEMP/ohos9"
+      - uses: actions/cache/save@v4
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/ohos9
+          key: navmini-ohos9-arm64-42444ed280e6-v1
+      - name: Install compiler dependencies
+        run: |
+          echo "OHOS_SDK=$RUNNER_TEMP/ohos9" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP/ohos9/js/build-tools/ace-loader"
+          if [ -f package-lock.json ]; then npm ci --legacy-peer-deps --no-audit --no-fund; else npm install --legacy-peer-deps --no-audit --no-fund; fi
+      - name: Preserve public signing tools for later local signing
+        run: |
+          mkdir -p nav-mini-tools
+          cp "$OHOS_SDK/toolchains/lib/"*.jar nav-mini-tools/
+          printf '%s\n' 'Unmodified public OpenHarmony SDK 3.2.11.9 signing tools. SDK archive SHA-256: 42444ed280e6dcead7b5c9aa0e20c8df80cae75b6d9e20bc4eb9ced8a617906d' > nav-mini-tools/SDK-SOURCE.txt
       - name: Compile and package unsigned Nav Mini
         env:
           HUASIDELOAD_SKIP_SIGN: '1'
@@ -57,3 +79,4 @@ jobs:
           path: |
             nav-mini-output/
             watch-apps/nav-mini/build/compile.log
+            nav-mini-tools/
