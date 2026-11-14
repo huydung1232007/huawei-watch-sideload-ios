@@ -12,6 +12,12 @@ final class TripHistoryStore: ObservableObject {
     init() {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory,in: .userDomainMask)[0]
         file = TripHistoryFile(url: directory.appendingPathComponent("TripHistory/trips.json"))
+        loadExisting()
+    }
+
+    func retryLoadingIfNeeded() { if !canSave { loadExisting() } }
+
+    private func loadExisting() {
         do {
             contents = try file.load()
             if var active = contents.active {
@@ -21,6 +27,7 @@ final class TripHistoryStore: ObservableObject {
                 try file.save(contents)
             }
             records = contents.records.sorted { $0.startedAt > $1.startedAt }
+            canSave = true; storageMessage = nil
         } catch {
             canSave = false
             storageMessage = "Chưa đọc được lịch sử đã lưu. Dữ liệu cũ được giữ nguyên; tạm thời không ghi đè."

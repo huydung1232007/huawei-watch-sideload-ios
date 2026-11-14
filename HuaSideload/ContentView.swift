@@ -49,7 +49,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .tabItem { Label("Đồng hồ", systemImage: "applewatch") }
+            .tabItem { Label("Đồng hồ", systemImage: "watch.analog") }
             .tag(Tab.watch)
 
             page("Tiện ích") {
@@ -79,6 +79,9 @@ struct ContentView: View {
             #endif
         }
         .onChange(of: filmMode) { _, on in if on { link.revealIdentity = false } }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            link.routeNavigator.history.retryLoadingIfNeeded()
+        }
     }
 
     // One tab: a list with the title and the shared toolbar (filming mode, language)

@@ -49,7 +49,10 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         didSet { UserDefaults.standard.set(turnAlertsEnabled,forKey: "turnAlertsEnabled") }
     }
     @Published var autoRerouteEnabled = UserDefaults.standard.object(forKey: "autoRerouteEnabled") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(autoRerouteEnabled,forKey: "autoRerouteEnabled") }
+        didSet {
+            UserDefaults.standard.set(autoRerouteEnabled,forKey: "autoRerouteEnabled")
+            reroutePolicy.resetObservation()
+        }
     }
     let history = TripHistoryStore()
     @Published private(set) var hasLocation = false
@@ -469,6 +472,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
                 guard let self, self.isNavigating else { return }
                 self.updateTrip(at: Date())
                 if Date().timeIntervalSince(self.currentLocation?.timestamp ?? .distantPast) > 25 {
+                    self.reroutePolicy.resetObservation()
                     self.status = "Mất tín hiệu GPS; đang chờ vị trí mới."
                     self.emit(instruction: "Mất GPS - chờ vị trí mới", distance: "", turn: .unspecified, force: true)
                 }
@@ -533,7 +537,14 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
 
     private func updateGuidance(_ location: CLLocation, force: Bool = false) {
         guard isNavigating, let path, let route, !maneuvers.isEmpty else { return }
+        guard abs(Date().timeIntervalSince(location.timestamp)) <= 25 else {
+            reroutePolicy.resetObservation()
+            status = "Mất tín hiệu GPS; đang chờ vị trí mới."
+            emit(instruction: "Mất GPS - chờ vị trí mới",distance: "",turn: .unspecified,force: force)
+            return
+        }
         guard location.horizontalAccuracy <= 60 else {
+            reroutePolicy.resetObservation()
             status = "GPS chưa đủ chính xác; đang chờ tín hiệu tốt hơn."
             emit(instruction: "Đang chờ GPS chính xác", distance: "", turn: .unspecified, force: force)
             return
@@ -604,7 +615,7 @@ extension RouteNavigator {
     // Public-landmark-only data for CI layout screenshots; excluded from device releases.
     func prepareVisualPreview() {
         let end = CLLocationCoordinate2D(latitude: 10.7869,longitude: 106.6981)
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: end)); item.name = "Nhà văn hóa Thanh niên"
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: end)); item.name = "Điểm đến minh họa"
         destination = Destination(item: item)
         let paths: [[CLLocationCoordinate2D]] = [
             [.init(latitude:10.77645,longitude:106.70092),.init(latitude:10.7800,longitude:106.6958),.init(latitude:10.7855,longitude:106.6965),end],

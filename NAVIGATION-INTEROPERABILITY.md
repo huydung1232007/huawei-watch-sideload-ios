@@ -203,3 +203,9 @@ CI additionally builds a simulator DEBUG app with synthetic public-landmark prev
 data to capture Navigation/History screenshots for visual review. Preview data is
 excluded from device Release builds and does not access any user watch/location.
 The original Google capture and display-demo functionality remain removed.
+
+The final CI run uses the previously verified ARM Xcode-27 image for simulator
+rendering; the first Intel run passed the logic suite and device Release build but
+was slow in simulator rendering. Boot and UI-render steps are bounded. New route
+responses also recheck GPS freshness, GPS loss resets deviation confirmation, and
+history read access is retried after the app becomes active/unlocked.
