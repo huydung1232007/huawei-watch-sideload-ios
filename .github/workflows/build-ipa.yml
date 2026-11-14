@@ -98,6 +98,14 @@ jobs:
           SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW=history xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
           sleep 3
           xcrun simctl io "$SIM_ID" screenshot history-ui.png
+          xcrun simctl terminate "$SIM_ID" com.example.huasideload.lite
+          SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW=favorites xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
+          sleep 3
+          xcrun simctl io "$SIM_ID" screenshot favorites-ui.png
+          xcrun simctl terminate "$SIM_ID" com.example.huasideload.lite
+          SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW=favorite-editor xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
+          sleep 3
+          xcrun simctl io "$SIM_ID" screenshot favorite-editor-ui.png
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -106,6 +114,8 @@ jobs:
           path: |
             navigation-ui.png
             history-ui.png
+            favorites-ui.png
+            favorite-editor-ui.png
             ui-build.log
 
       - uses: actions/upload-artifact@v4

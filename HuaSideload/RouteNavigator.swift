@@ -55,6 +55,11 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
     }
     let history = TripHistoryStore()
+    let favorites = FavoritePlacesStore()
+    @Published private(set) var isCapturingFavorite = false
+    @Published private(set) var capturedFavorite: FavoritePlace?
+    @Published private(set) var favoriteCaptureError: String?
+    private var favoriteTimeout: Task<Void,Never>?
     @Published private(set) var hasLocation = false
     @Published private(set) var hasRoute = false
     @Published private(set) var displayPolyline: MKPolyline?
@@ -130,6 +135,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         if isNavigating && ![.authorizedAlways, .authorizedWhenInUse].contains(manager.authorizationStatus) {
             stop(reason: "Quyền vị trí không còn được cấp.")
         }
+        if isCapturingFavorite { startFavoriteLocationUpdates() }
         guard waitingForLocation else { return }
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse: manager.requestLocation()
@@ -138,6 +144,50 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             locationStatus = "Chưa được cấp quyền vị trí."
         default: break
         }
+    }
+
+    func captureFavoriteGPS() {
+        guard !isCapturingFavorite else { return }
+        capturedFavorite = nil; favoriteCaptureError = nil
+        isCapturingFavorite = true
+        if let fix = currentLocation, useFavoriteFix(fix) { return }
+        startFavoriteLocationUpdates()
+        guard isCapturingFavorite else { return }
+        favoriteTimeout = Task { [weak self] in
+            do { try await Task.sleep(for:.seconds(20)) } catch { return }
+            guard let self, self.isCapturingFavorite else { return }
+            self.cancelFavoriteGPS()
+            self.favoriteCaptureError = "Chưa lấy được GPS đủ chính xác. Bật Vị trí chính xác, ra nơi thoáng rồi thử lại."
+        }
+    }
+
+    private func startFavoriteLocationUpdates() {
+        switch manager.authorizationStatus {
+        case .notDetermined: manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            if !isNavigating {
+                manager.distanceFilter = kCLDistanceFilterNone
+                manager.startUpdatingLocation()
+            }
+        default:
+            cancelFavoriteGPS()
+            favoriteCaptureError = "Cần cho phép Vị trí và bật Vị trí chính xác để lưu GPS hiện tại."
+        }
+    }
+
+    @discardableResult private func useFavoriteFix(_ fix: CLLocation) -> Bool {
+        guard isCapturingFavorite,
+              FavoriteGPSFix.usable(timestamp:fix.timestamp.timeIntervalSinceReferenceDate,
+                  now:Date().timeIntervalSinceReferenceDate,accuracy:fix.horizontalAccuracy) else { return false }
+        capturedFavorite = FavoritePlace(name:"Vị trí hiện tại",latitude:fix.coordinate.latitude,longitude:fix.coordinate.longitude)
+        cancelFavoriteGPS()
+        return true
+    }
+
+    func cancelFavoriteGPS() {
+        guard isCapturingFavorite else { return }
+        isCapturingFavorite = false; favoriteTimeout?.cancel(); favoriteTimeout = nil
+        if !isNavigating { manager.stopUpdatingLocation(); manager.distanceFilter = 5 }
     }
 
     func searchDestination() {
@@ -516,6 +566,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
               NavigationFixFreshness.accepts(timestamp: location.timestamp.timeIntervalSinceReferenceDate,
                   now: Date().timeIntervalSinceReferenceDate,previous: currentLocation?.timestamp.timeIntervalSinceReferenceDate) else { return }
         currentLocation = location
+        if isCapturingFavorite { useFavoriteFix(location) }
         waitingForLocation = false
         hasLocation = location.horizontalAccuracy <= 80
         locationStatus = "GPS: sai số khoảng \(Int(location.horizontalAccuracy)) m."
@@ -534,7 +585,13 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         waitingForLocation = false
         locationStatus = "Chưa lấy được GPS: \(error.localizedDescription)"
-        if (error as? CLError)?.code == .denied { stop(reason: "Quyền vị trí không còn được cấp.") }
+        if (error as? CLError)?.code == .denied {
+            if isCapturingFavorite {
+                cancelFavoriteGPS()
+                favoriteCaptureError = "Chưa được cấp quyền vị trí. Mở Cài đặt và cho phép vị trí cho app."
+            }
+            stop(reason: "Quyền vị trí không còn được cấp.")
+        }
         else if isNavigating {
             emit(instruction: "Đang chờ GPS chính xác", distance: "", turn: .unspecified, force: true)
         }
@@ -641,6 +698,7 @@ extension RouteNavigator {
         currentLocation = CLLocation(latitude:10.77645,longitude:106.70092)
         hasLocation = true; locationStatus = "GPS sẵn sàng"
         history.prepareVisualPreview()
+        favorites.prepareVisualPreview()
     }
 }
 #endif

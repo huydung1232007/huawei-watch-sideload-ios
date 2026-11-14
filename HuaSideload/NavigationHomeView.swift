@@ -8,6 +8,8 @@ struct NavigationHomeView: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var searching = false
     @State private var settings = false
+    @State private var showingFavorites = false
+    @State private var captureFavoriteOnOpen = false
 
     var body: some View {
         Map(position: $camera) {
@@ -25,6 +27,14 @@ struct NavigationHomeView: View {
         .safeAreaInset(edge: .bottom,spacing: 0) { bottomPanel }
         .sheet(isPresented: $searching) { DestinationSearchView(navigator: navigator) }
         .sheet(isPresented: $settings) { NavigationSettingsView(navigator: navigator,link: link) }
+        .sheet(isPresented: $showingFavorites) {
+            FavoritePlacesView(navigator:navigator,favorites:navigator.favorites,captureOnOpen:captureFavoriteOnOpen)
+        }
+        .onAppear {
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("favorite") == true { showingFavorites = true }
+            #endif
+        }
         .onChange(of: navigator.routeRevision) { _, _ in
             guard let line = navigator.displayPolyline else { return }
             let rect = line.boundingMapRect
@@ -66,6 +76,15 @@ struct NavigationHomeView: View {
         VStack(alignment: .leading,spacing: 14) {
             if navigator.isNavigating { activePanel }
             else { planningPanel }
+            HStack {
+                Button {
+                    captureFavoriteOnOpen = false; showingFavorites = true
+                } label: { Label("Yêu thích",systemImage:"star.fill") }
+                Spacer()
+                Button {
+                    captureFavoriteOnOpen = true; showingFavorites = true
+                } label: { Label("Lưu GPS",systemImage:"location.circle") }
+            }.font(.subheadline).buttonStyle(.borderless)
             if navigator.mode == .motorcycle {
                 Link("Tuyến © OpenStreetMap contributors",destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                     .font(.system(size: 10)).foregroundStyle(.secondary)

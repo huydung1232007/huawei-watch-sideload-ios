@@ -81,6 +81,7 @@ struct ContentView: View {
         .onChange(of: filmMode) { _, on in if on { link.revealIdentity = false } }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             link.routeNavigator.history.retryLoadingIfNeeded()
+            link.routeNavigator.favorites.retryLoadingIfNeeded()
         }
     }
 
