@@ -39,6 +39,7 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var installedApps: [WatchApps.Installed] = []
     @Published private(set) var watchUDID: String?
     @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
+    @Published private(set) var navigationDeliveryInfo = "Chưa có thời gian xác nhận chỉ dẫn."
     private var navigationPeer: PineNavigationWire.PeerIdentity?
     private var navigationIsOpen = false
     let routeNavigator = RouteNavigator()
@@ -468,6 +469,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func navigationSend(_ data: [UInt8], session: HuaweiSession, label: String) async throws {
+        let started = ProcessInfo.processInfo.systemUptime
         append(.info, "Navigation TX \(label): \(data.count)B, identity \(navigationPeer == nil ? "APK fallback" : "from watch")")
         let reply = try await session.p2p(kind: P2P.Kind.data,
             source: PineNavigationWire.phonePackage, destination: PineNavigationWire.watchPackage,
@@ -475,6 +477,9 @@ final class WatchLink: NSObject, ObservableObject {
             destinationFingerprint: navigationPeer?.watchFingerprint ?? PineNavigationWire.watchFingerprint, data: data)
         guard reply.code == P2P.Code.ok else {
             throw HuaweiAuthError.watchError("Navigation \(label) P2P result: \(reply.code.map(String.init) ?? "missing ACK code")")
+        }
+        if label == "route guidance" {
+            navigationDeliveryInfo = String(format: "Đồng hồ xác nhận sau %.1f giây.",ProcessInfo.processInfo.systemUptime-started)
         }
     }
 

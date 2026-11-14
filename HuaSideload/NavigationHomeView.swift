@@ -281,6 +281,11 @@ private struct NavigationSettingsView: View {
                     Toggle("Tự đổi tuyến khi đi lệch",isOn: $navigator.autoRerouteEnabled)
                 } footer: { Text("Chỉ tính lại sau khi GPS đủ chính xác và xác nhận lệch tuyến. Cần mạng để lấy tuyến mới. Chọn Xe máy để tránh dùng tuyến Ô tô.") }
                 Section {
+                    Text(navigator.locationStatus).font(.footnote)
+                    Text(link.navigationDeliveryInfo).font(.footnote)
+                } header: { Label("Tín hiệu cập nhật",systemImage: "antenna.radiowaves.left.and.right") }
+                footer: { Text("Chỉ dẫn gửi khoảng mỗi giây khi có vị trí mới. Thời gian xác nhận đo kết nối với đồng hồ, không đo thời điểm màn hình đồng hồ vẽ xong.") }
+                Section {
                     Label("Lịch sử lưu trên iPhone",systemImage: "iphone.and.arrow.forward")
                     Text("Lưu điểm đến, quãng đường, thời gian và tốc độ trung bình; không lưu đường GPS chi tiết. Bạn có thể xóa từng chuyến trong tab Lịch sử.").font(.footnote).foregroundStyle(.secondary)
                 }

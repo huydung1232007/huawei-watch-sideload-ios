@@ -1,5 +1,35 @@
 import Foundation
 
+// Send fresh GPS guidance roughly once a second, with bounded extra updates at
+// critical turn thresholds. The rate limit never delays the phone's own UI.
+struct GuidanceRefreshPolicy {
+    private var sentAt = -Double.infinity
+    private var sentKey: String?
+    private var sentDistance: Double?
+
+    mutating func shouldSend(key: String, distance: Double?, now: Double, force: Bool) -> Bool {
+        let elapsed = now - sentAt
+        let crossedThreshold: Bool
+        if let old = sentDistance, let distance, old.isFinite, distance.isFinite {
+            crossedThreshold = [50.0, 20, 10, 0].contains { old > $0 && distance <= $0 }
+        } else { crossedThreshold = false }
+        guard force || elapsed >= 0.9 || (elapsed >= 0.25 && (key != sentKey || crossedThreshold)) else { return false }
+        sentAt = now; sentKey = key; sentDistance = distance
+        return true
+    }
+}
+
+enum NavigationFixFreshness {
+    static func isFresh(timestamp: Double, now: Double) -> Bool {
+        let age = now - timestamp
+        return age.isFinite && age >= -2 && age <= 6
+    }
+    static func accepts(timestamp: Double, now: Double, previous: Double?) -> Bool {
+        let age = now - timestamp
+        return age.isFinite && age >= -2 && age < 30 && (previous == nil || timestamp > previous!)
+    }
+}
+
 struct TurnAlertPolicy {
     private var alerted: [Int: Set<Int>] = [:]
     private var lastAlert = -Double.infinity
@@ -52,7 +82,22 @@ struct NavigationOutbox {
     var hasPending: Bool { stopping || latest != nil || alert != nil }
     mutating func enqueue(_ data: [UInt8], isAlert: Bool) {
         stopping = false
-        if isAlert { alert = data; latest = nil } else { latest = data }
+        if isAlert { alert = data; latest = nil; return }
+        // While the current BLE request is awaiting its acknowledgement, update
+        // a queued alert's distance too. Do not replay an old "190 m" alert ahead
+        // of a new "30 m" fix, or vibrate for a turn that is no longer current.
+        if let pending = alert,
+           let old = try? JSONSerialization.jsonObject(with: Data(pending)) as? [String: String],
+           var fresh = try? JSONSerialization.jsonObject(with: Data(data)) as? [String: String],
+           let pattern = old["v"], !pattern.isEmpty {
+            if old["i"] == fresh["i"], old["p"] == fresh["p"] {
+                fresh["v"] = pattern
+                if let merged = try? JSONSerialization.data(withJSONObject: fresh,options: [.sortedKeys]) {
+                    alert = Array(merged); latest = nil; return
+                }
+            } else { alert = nil }
+        }
+        latest = data
     }
     mutating func stop() { latest = nil; alert = nil; stopping = true }
     mutating func clear() { latest = nil; alert = nil; stopping = false }

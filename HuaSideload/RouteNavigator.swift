@@ -93,8 +93,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private var maneuverIndex = 0
     private var progress = 0.0
     private var lastFixTime: Date?
-    private var lastSent = Date.distantPast
-    private var lastSentIndex = -1
+    private var refreshPolicy = GuidanceRefreshPolicy()
     private var alertPolicy = TurnAlertPolicy()
     private var reroutePolicy = ReroutePolicy()
     private var tripAccumulator: TripAccumulator?
@@ -234,7 +233,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         instructionPreview = candidate.maneuvers.map(\.instruction)
         preview = summary(candidate.plan)
         instruction = ""; distanceToTurn = ""
-        maneuverIndex = 0; progress = 0; lastFixTime = nil; lastSentIndex = -1
+        maneuverIndex = 0; progress = 0; lastFixTime = nil; refreshPolicy = GuidanceRefreshPolicy()
         hasRoute = true
     }
 
@@ -451,7 +450,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             return
         }
         maneuverIndex = 0; progress = 0; lastFixTime = nil
-        lastSent = .distantPast; lastSentIndex = -1
+        refreshPolicy = GuidanceRefreshPolicy()
         tripStartedAt = Date(); navigationSession = UUID()
         alertPolicy = TurnAlertPolicy(); reroutePolicy = ReroutePolicy()
         tripAccumulator = TripAccumulator(startedAt: tripStartedAt,destination: destination?.name ?? "Điểm đến",mode: mode.title,walking: mode == .walking)
@@ -468,13 +467,18 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         fixMonitor?.cancel()
         fixMonitor = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 guard let self, self.isNavigating else { return }
                 self.updateTrip(at: Date())
-                if Date().timeIntervalSince(self.currentLocation?.timestamp ?? .distantPast) > 25 {
+                let now = Date()
+                if let fix = self.currentLocation {
+                    let age = max(0,now.timeIntervalSince(fix.timestamp))
+                    self.locationStatus = "GPS: sai số khoảng \(Int(fix.horizontalAccuracy)) m · vị trí cách đây \(Int(age)) giây."
+                }
+                if !NavigationFixFreshness.isFresh(timestamp: (self.currentLocation?.timestamp ?? .distantPast).timeIntervalSinceReferenceDate,now: now.timeIntervalSinceReferenceDate) {
                     self.reroutePolicy.resetObservation()
-                    self.status = "Mất tín hiệu GPS; đang chờ vị trí mới."
-                    self.emit(instruction: "Mất GPS - chờ vị trí mới", distance: "", turn: .unspecified, force: true)
+                    self.status = "GPS cập nhật chậm; đang chờ vị trí mới."
+                    self.emit(instruction: "GPS chậm - chờ vị trí mới", distance: "", turn: .unspecified, force: false)
                 }
             }
         }
@@ -508,8 +512,9 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last, location.horizontalAccuracy >= 0,
-              abs(Date().timeIntervalSince(location.timestamp)) < 30 else { return }
+        guard let location = locations.filter({ $0.horizontalAccuracy >= 0 }).max(by: { $0.timestamp < $1.timestamp }),
+              NavigationFixFreshness.accepts(timestamp: location.timestamp.timeIntervalSinceReferenceDate,
+                  now: Date().timeIntervalSinceReferenceDate,previous: currentLocation?.timestamp.timeIntervalSinceReferenceDate) else { return }
         currentLocation = location
         waitingForLocation = false
         hasLocation = location.horizontalAccuracy <= 80
@@ -537,10 +542,10 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
 
     private func updateGuidance(_ location: CLLocation, force: Bool = false) {
         guard isNavigating, let path, let route, !maneuvers.isEmpty else { return }
-        guard abs(Date().timeIntervalSince(location.timestamp)) <= 25 else {
+        guard NavigationFixFreshness.isFresh(timestamp: location.timestamp.timeIntervalSinceReferenceDate,now: Date().timeIntervalSinceReferenceDate) else {
             reroutePolicy.resetObservation()
-            status = "Mất tín hiệu GPS; đang chờ vị trí mới."
-            emit(instruction: "Mất GPS - chờ vị trí mới",distance: "",turn: .unspecified,force: force)
+            status = "GPS cập nhật chậm; đang chờ vị trí mới."
+            emit(instruction: "GPS chậm - chờ vị trí mới",distance: "",turn: .unspecified,force: force)
             return
         }
         guard location.horizontalAccuracy <= 60 else {
@@ -590,16 +595,16 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         let vibration = turnAlertsEnabled ? alertPolicy.pattern(maneuver: maneuverIndex,turn: next.turn,distance: remaining,
             elapsed: Date().timeIntervalSince(tripStartedAt),eligible: next.at > 20) : nil
         emit(instruction: next.instruction, distance: Self.distance(remaining), turn: next.turn,
-             eta: eta, speed: currentSpeed, force: force || vibration != nil, vibration: vibration ?? "")
+             eta: eta, speed: currentSpeed, force: force || vibration != nil, vibration: vibration ?? "", remainingMeters: remaining)
     }
 
     private func emit(instruction: String, distance: String, turn: PineNavigationWire.Turn,
-                      eta: String = "", speed: String = "", force: Bool, vibration: String = "") {
-        guard force || lastSentIndex != maneuverIndex || Date().timeIntervalSince(lastSent) >= 3 else { return }
+                      eta: String = "", speed: String = "", force: Bool, vibration: String = "", remainingMeters: Double? = nil) {
         self.instruction = instruction; distanceToTurn = distance; currentTurn = turn
+        let key = "\(maneuverIndex)|\(turn.rawValue)|\(instruction)"
+        guard refreshPolicy.shouldSend(key: key,distance: remainingMeters,now: ProcessInfo.processInfo.systemUptime,force: force) else { return }
         do {
             let data = try PineNavigationWire.guidance(instruction: instruction, distance: distance, turn: turn, eta: eta, speed: speed, vibration: vibration)
-            lastSent = Date(); lastSentIndex = maneuverIndex
             onGuidance?(data,!vibration.isEmpty)
         } catch { status = "Không mã hóa được chỉ dẫn: \(error)" }
     }

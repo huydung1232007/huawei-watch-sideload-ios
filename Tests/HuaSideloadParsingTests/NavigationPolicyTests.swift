@@ -2,6 +2,77 @@ import XCTest
 @testable import HuaSideloadParsing
 
 final class NavigationPolicyTests: XCTestCase {
+    func testOrdinaryDistanceRefreshNoLongerWaitsThreeSeconds() {
+        var policy = GuidanceRefreshPolicy()
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 100,now: 0,force: false))
+        XCTAssertFalse(policy.shouldSend(key: "left",distance: 95,now: 0.4,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 88,now: 1,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 76,now: 2,force: false))
+    }
+    func testNearTurnCrossingCanRefreshBeforeOneSecond() {
+        var policy = GuidanceRefreshPolicy()
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 55,now: 0,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 49,now: 0.3,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 19,now: 0.6,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 9,now: 0.9,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 0,now: 1.2,force: false))
+    }
+    func testChangedManeuverAndGPSStateAreNotHeldForOrdinaryCadence() {
+        var policy = GuidanceRefreshPolicy()
+        _ = policy.shouldSend(key: "left",distance: 0,now: 0,force: false)
+        XCTAssertTrue(policy.shouldSend(key: "right",distance: 80,now: 0.3,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "gps-stale",distance: nil,now: 0.6,force: false))
+    }
+    func testThresholdUpdatesAreBoundedAndForceStillPasses() {
+        var policy = GuidanceRefreshPolicy()
+        _ = policy.shouldSend(key: "left",distance: 55,now: 0,force: false)
+        XCTAssertFalse(policy.shouldSend(key: "left",distance: 49,now: 0.1,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "left",distance: 48,now: 0.3,force: false))
+        XCTAssertFalse(policy.shouldSend(key: "left",distance: 47,now: 0.4,force: false))
+        XCTAssertTrue(policy.shouldSend(key: "arrival",distance: 0,now: 0.41,force: true))
+    }
+    func testOldOrFutureGPSCannotLookFresh() {
+        XCTAssertTrue(NavigationFixFreshness.isFresh(timestamp: 100,now: 106))
+        XCTAssertFalse(NavigationFixFreshness.isFresh(timestamp: 100,now: 106.01))
+        XCTAssertFalse(NavigationFixFreshness.isFresh(timestamp: 100,now: 97))
+        XCTAssertFalse(NavigationFixFreshness.isFresh(timestamp: .nan,now: 100))
+    }
+    func testBatchedLocationsCannotRollProgressBackToOlderFix() {
+        XCTAssertTrue(NavigationFixFreshness.accepts(timestamp: 100,now: 101,previous: 99))
+        XCTAssertFalse(NavigationFixFreshness.accepts(timestamp: 99,now: 101,previous: 100))
+        XCTAssertFalse(NavigationFixFreshness.accepts(timestamp: 100,now: 101,previous: 100))
+        XCTAssertFalse(NavigationFixFreshness.accepts(timestamp: 70,now: 101,previous: nil))
+        XCTAssertFalse(NavigationFixFreshness.accepts(timestamp: 105,now: 101,previous: nil))
+    }
+    func testFortyKmhSimulationUsesLatestFixEverySecond() {
+        var policy = GuidanceRefreshPolicy()
+        var shown = 100.0
+        for second in 0...6 {
+            let actual = max(0,100-Double(second)*40/3.6)
+            if policy.shouldSend(key: "left",distance: actual,now: Double(second),force: false) { shown = actual }
+            XCTAssertEqual(shown,actual,accuracy: 0.01)
+        }
+    }
+    func testQueuedAlertUsesLatestDistanceWhileWaitingForBLE() throws {
+        var box = NavigationOutbox()
+        box.enqueue(try PineNavigationWire.guidance(instruction: "Rẽ trái",distance: "190 m",turn: .left,vibration: "L"),isAlert: true)
+        box.enqueue(try PineNavigationWire.guidance(instruction: "Rẽ trái",distance: "30 m",turn: .left),isAlert: false)
+        let packet = try XCTUnwrap(box.next())
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(packet.data)) as? [String: String])
+        XCTAssertEqual(fields["d"],"30 m")
+        XCTAssertEqual(fields["v"],"L")
+        XCTAssertNil(box.next())
+    }
+    func testQueuedOldTurnAlertIsDiscardedWhenManeuverChanges() throws {
+        var box = NavigationOutbox()
+        box.enqueue(try PineNavigationWire.guidance(instruction: "Rẽ trái",distance: "45 m",turn: .left,vibration: "L"),isAlert: true)
+        box.enqueue(try PineNavigationWire.guidance(instruction: "Rẽ phải",distance: "80 m",turn: .right),isAlert: false)
+        let packet = try XCTUnwrap(box.next())
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(packet.data)) as? [String: String])
+        XCTAssertEqual(fields["i"],"Rẽ phải")
+        XCTAssertEqual(fields["v"],"")
+        XCTAssertNil(box.next())
+    }
     func testAlertsAtBothThresholdsWithoutRepeating() {
         var policy = TurnAlertPolicy()
         XCTAssertNil(policy.pattern(maneuver: 1,turn: .left,distance: 250,elapsed: 10,eligible: true))
