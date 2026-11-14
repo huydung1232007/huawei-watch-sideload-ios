@@ -8,6 +8,7 @@ struct MotorcycleRoute {
     let steps: [Step]
     let duration: Double
     let distance: Double
+    let via: String
 
     enum RouteError: LocalizedError {
         case invalid, highway, wrongMode, provider(String)
@@ -26,7 +27,7 @@ struct MotorcycleRoute {
         return try JSONSerialization.data(withJSONObject: [
             "locations": [["lat": origin.latitude, "lon": origin.longitude], ["lat": destination.latitude, "lon": destination.longitude]],
             "costing": "motorcycle", "costing_options": ["motorcycle": ["use_highways": 0, "use_tolls": 0, "use_trails": 0]],
-            "units": "kilometers", "language": "en-US"
+            "units": "kilometers", "language": "en-US", "alternates": 2
         ])
     }
 
@@ -69,7 +70,33 @@ struct MotorcycleRoute {
             steps.append(Step(index: index, instruction: translated, turn: direction))
             lastIndex = index
         }
-        return MotorcycleRoute(coordinates: coordinates, steps: steps, duration: duration, distance: length * 1000)
+        let namedRoads: [(String, Double)] = maneuvers.compactMap { maneuver in
+            guard let name = (maneuver["street_names"] as? [String])?.first, !name.isEmpty else { return nil }
+            return (name, maneuver["length"] as? Double ?? 0)
+        }.sorted { $0.1 > $1.1 }
+        var roads: [String] = []
+        for (name, _) in namedRoads where !roads.contains(name) {
+            roads.append(name)
+            if roads.count == 2 { break }
+        }
+        return MotorcycleRoute(coordinates: coordinates, steps: steps, duration: duration, distance: length * 1000,
+                               via: String(roads.joined(separator: " · ").prefix(140)))
+    }
+
+    static func decodeOptions(_ data: Data) throws -> [MotorcycleRoute] {
+        guard data.count < 4_000_000, let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw RouteError.invalid }
+        if let error = root["error"] as? String { throw RouteError.provider(error) }
+        let candidates = [root] + Array(((root["alternates"] as? [[String: Any]]) ?? []).prefix(2))
+        var routes: [MotorcycleRoute] = []
+        var firstError: Error?
+        for candidate in candidates {
+            do {
+                let value = try decode(JSONSerialization.data(withJSONObject: candidate))
+                if !routes.contains(where: { $0.coordinates == value.coordinates }) { routes.append(value) }
+            } catch { if firstError == nil { firstError = error } }
+        }
+        guard !routes.isEmpty else { throw firstError ?? RouteError.invalid }
+        return routes
     }
 
     static func turn(_ type: Int) -> PineNavigationWire.Turn {

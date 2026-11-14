@@ -91,3 +91,10 @@ NAVIGATION-INTEROPERABILITY.md for provider, privacy and unverified behavior det
 The user physically confirmed pairing and DEMO display on 1.1.4. The 1.1.5 CI run
 found a Vietnamese normalization test failure before app compilation; that failure
 was corrected by normalizing the letter đ explicitly in 1.1.6.
+
+
+Current planned build: 1.1.7 build 9 removes the Google screen-reading experiment
+at the user's request and adds alternate-route selection on the Apple map. Map
+search/display is Apple; motorcycle routes remain Valhalla/OpenStreetMap. The user
+confirmed the 1.1.6 Apple-map route mode works; the new route selection still needs
+physical confirmation. See the final section of NAVIGATION-INTEROPERABILITY.md.

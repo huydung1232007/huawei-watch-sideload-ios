@@ -62,7 +62,6 @@ struct ContentView: View {
 
             page(L("Features", "Özellikler")) {
                 if link.isPaired {
-                    GoogleMapsSection(reader: link.mapsReader, link: link)
                     NavigationRouteSection(navigator: link.routeNavigator, link: link)
                     Section("Navigation Watch — thử hiển thị") {
                         Text(link.navigationStatus).font(.callout)

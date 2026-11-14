@@ -41,6 +41,7 @@ final class MotorcycleRouteTests: XCTestCase {
         let data = try MotorcycleRoute.request(origin: .init(latitude: 10, longitude: 106), destination: .init(latitude: 11, longitude: 106))
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(root["costing"] as? String, "motorcycle")
+        XCTAssertEqual(root["alternates"] as? Int, 2)
         XCTAssertNil(root["ignore_access"])
         XCTAssertThrowsError(try MotorcycleRoute.request(origin: .init(latitude: 91, longitude: 106), destination: .init(latitude: 11, longitude: 106)))
     }
@@ -56,4 +57,50 @@ final class MotorcycleRouteTests: XCTestCase {
         XCTAssertEqual(MotorcycleRoute.turn(13), .uTurn)
         XCTAssertEqual(MotorcycleRoute.turn(26), .unspecified)
     }
+
+    private func alternativeFixture() throws -> [String: Any] {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "motorcycle-hcmc-alternatives", withExtension: "json"))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+
+    func testReadsThreeDistinctPublicRoutesInProviderOrder() throws {
+        let routes = try MotorcycleRoute.decodeOptions(encode(alternativeFixture()))
+        XCTAssertEqual(routes.count, 3)
+        XCTAssertEqual(routes[0].distance, 2312, accuracy: 1)
+        XCTAssertEqual(routes[1].distance, 2315, accuracy: 1)
+        XCTAssertEqual(routes[2].distance, 2796, accuracy: 1)
+        XCTAssertNotEqual(routes[0].coordinates, routes[1].coordinates)
+        XCTAssertTrue(routes.allSatisfy { !$0.steps.isEmpty && !$0.via.isEmpty })
+    }
+
+    func testDuplicateGeometryDoesNotCreateFakeExtraChoices() throws {
+        var root = try fixture()
+        root["alternates"] = [["trip": root["trip"]!], ["trip": root["trip"]!]]
+        XCTAssertEqual(try MotorcycleRoute.decodeOptions(encode(root)).count, 1)
+    }
+
+    func testUnsafeAlternativeIsFilteredWithoutDroppingValidChoices() throws {
+        var root = try alternativeFixture()
+        var alternatives = root["alternates"] as! [[String: Any]]
+        var trip = alternatives[0]["trip"] as! [String: Any]
+        var summary = trip["summary"] as! [String: Any]; summary["has_highway"] = true
+        trip["summary"] = summary; alternatives[0]["trip"] = trip; root["alternates"] = alternatives
+        let routes = try MotorcycleRoute.decodeOptions(encode(root))
+        XCTAssertEqual(routes.count, 2)
+        XCTAssertEqual(routes[1].distance, 2796, accuracy: 1)
+    }
+
+    func testValidAlternateCanReplaceRejectedPrimary() throws {
+        var root = try alternativeFixture(); var trip = root["trip"] as! [String: Any]
+        var summary = trip["summary"] as! [String: Any]; summary["has_highway"] = true
+        trip["summary"] = summary; root["trip"] = trip
+        let routes = try MotorcycleRoute.decodeOptions(encode(root))
+        XCTAssertEqual(routes.count, 2)
+        XCTAssertEqual(routes[0].distance, 2315, accuracy: 1)
+    }
+
+    func testSingleRouteResponseStillWorksWithoutAlternates() throws {
+        XCTAssertEqual(try MotorcycleRoute.decodeOptions(encode(fixture())).count, 1)
+    }
+
 }

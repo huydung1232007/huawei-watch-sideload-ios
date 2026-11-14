@@ -123,3 +123,34 @@ References:
 - https://developer.apple.com/documentation/mapkit/mkdirectionstransporttype
 - https://github.com/valhalla/valhalla#demo-server
 - https://valhalla.github.io/valhalla/api/route/api-reference/
+
+
+## Apple-map route selection (1.1.7 build 9)
+
+The user reported the Apple-map route mode working on the phone; this does not
+separately establish how long screen-locked updates were tested. Google navigation
+was not producing a visible arrow/distance yet. The user then explicitly requested
+removing Google Maps and adding route selection to the Apple-map view. Accordingly,
+the Google UI, screen capture driver, OCR/arrow code/tests, URL scheme and capture
+background/usage declarations are removed. Current app code has no Google mode.
+The build can again use the existing iOS 17 target and macOS 15 Intel CI toolchain.
+
+Route calculation requests alternate routes from both providers. Motorcycle requests
+ask for two alternates, yielding at most three displayed choices. Each motorcycle
+candidate undergoes the same mode/highway/geometry checks; invalid alternatives are
+filtered, identical geometry is deduplicated, and no extra routes are synthesized.
+MapKit walking/automobile routes use requestsAlternateRoutes. A provider may return
+only one reasonable route. Each row shows a route number, distance, duration and
+road summary; the selected route is blue and other routes gray. Selecting a row
+atomically replaces the route geometry, origin and maneuver list used by guidance.
+Changing selection is disabled while navigating; stop first to choose another route.
+
+A single public-landmark HCMC probe returned three motorcycle routes of 2.312 km,
+2.315 km and 2.796 km. The response is retained as a bounded parser test fixture,
+without any user location. This confirms the live API response format, not physical
+route selection/navigation behavior on the user's watch. The new selection flow
+requires a device-side check after installing the updated IPA.
+
+References:
+- https://developer.apple.com/documentation/mapkit/mkdirections/request/requestsalternateroutes
+- https://valhalla.github.io/valhalla/api/route/api-reference/

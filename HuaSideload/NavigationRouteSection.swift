@@ -8,7 +8,7 @@ struct NavigationRouteSection: View {
     var body: some View {
         Section {
             Text(navigator.status).font(.callout)
-            if !navigator.isNavigating && !link.mapsReader.isReading {
+            if !navigator.isNavigating {
                 Picker("Cách di chuyển", selection: $navigator.mode) {
                     ForEach(RouteNavigator.Mode.allCases) { Text($0.title).tag($0) }
                 }
@@ -39,9 +39,40 @@ struct NavigationRouteSection: View {
                     Button(navigator.isCalculating ? "Đang tính…" : "Tính tuyến đường") { navigator.calculateRoute() }
                         .disabled(navigator.isCalculating || navigator.isSearching)
                 }
+                if !navigator.isNavigating && !navigator.routeChoices.isEmpty {
+                    Text(navigator.routeChoices.count > 1 ? "Chọn tuyến đường" : "Tuyến đường được trả về")
+                        .font(.headline)
+                    ForEach(navigator.routeChoices) { choice in
+                        Button { navigator.selectRoute(choice.id) } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: navigator.selectedRouteID == choice.id ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(navigator.selectedRouteID == choice.id ? Color.blue : Color.secondary)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(choice.title).fontWeight(.semibold)
+                                    Text(choice.detail).font(.callout)
+                                    if !choice.via.isEmpty { Text(choice.via).font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(link.commandsLocked || navigator.isCalculating)
+                        .accessibilityValue(navigator.selectedRouteID == choice.id ? "Đang chọn" : "Chưa chọn")
+                    }
+                }
+                if let selected = navigator.routeChoices.first(where: { $0.id == navigator.selectedRouteID }) {
+                    LabeledContent("Tuyến đang chọn", value: selected.title)
+                }
                 if let polyline = navigator.displayPolyline {
                     Map {
-                        MapPolyline(polyline).stroke(.blue, lineWidth: 5)
+                        if !navigator.isNavigating {
+                            ForEach(navigator.routeChoices.filter { $0.id != navigator.selectedRouteID }) { choice in
+                                MapPolyline(choice.polyline).stroke(.gray.opacity(0.6), lineWidth: 4)
+                            }
+                        }
+                        MapPolyline(polyline).stroke(.blue, lineWidth: 6)
                         Marker(destination.name, coordinate: destination.item.placemark.coordinate)
                         UserAnnotation()
                     }
@@ -68,7 +99,7 @@ struct NavigationRouteSection: View {
         } footer: {
             VStack(alignment: .leading, spacing: 5) {
             Link("Dữ liệu tuyến xe máy © OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
-            Text("Bắt đầu khi app đang mở, cho phép Vị trí chính xác rồi mới khóa iPhone. Giữ Navigation mở trên đồng hồ và không vuốt tắt HuaSideload. Khi lệch tuyến, dừng và tính lại tuyến. Ưu tiên nội dung chỉ dẫn nếu biểu tượng chưa thể hiện đúng hướng.")
+            Text("Tuyến đã chọn có nét xanh, các tuyến khác màu xám. Bắt đầu khi app đang mở, cho phép Vị trí chính xác rồi mới khóa iPhone. Giữ Navigation mở trên đồng hồ và không vuốt tắt HuaSideload. Khi lệch tuyến, dừng và tính lại tuyến. Ưu tiên nội dung chỉ dẫn nếu biểu tượng chưa thể hiện đúng hướng.")
             }
         }
     }
