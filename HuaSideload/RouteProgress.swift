@@ -43,4 +43,33 @@ struct RouteProgress {
         }
         return best
     }
+
+    // MapKit Mercator x points east and y points south. Its local angles are
+    // conformal; meter lengths control the sampling window independently of
+    // coordinate scale. Reject corners/hairpins rather than averaging across
+    // them and mistaking a legitimate turn for opposite travel.
+    func stableForwardBearing(at along: Double) -> Double? {
+        guard along.isFinite,(0...totalLength).contains(along) else { return nil }
+        let start = max(0,along-6),end = min(totalLength,along+6)
+        guard end-start >= 4,let a = point(at:start),let b = point(at:end),
+              hypot(b.x-a.x,b.y-a.y) > 0 else { return nil }
+        func bearing(_ dx: Double,_ dy: Double) -> Double {
+            (atan2(dx,-dy)*180/Double.pi+360).truncatingRemainder(dividingBy:360)
+        }
+        let heading = bearing(b.x-a.x,b.y-a.y)
+        let low = max(0,along-20),high = min(totalLength,along+20)
+        for i in lengths.indices where lengths[i] > 0 && cumulative[i+1] > low && cumulative[i] < high {
+            let dx = points[i+1].x-points[i].x,dy = points[i+1].y-points[i].y
+            guard hypot(dx,dy) > 0,RouteDirectionPolicy.angularDifference(heading,bearing(dx,dy)) <= 40 else { return nil }
+        }
+        return heading
+    }
+    private func point(at meters: Double) -> Point? {
+        for i in lengths.indices where lengths[i] > 0 && meters >= cumulative[i] && meters <= cumulative[i+1] {
+            let t = (meters-cumulative[i])/lengths[i]
+            return Point(x:points[i].x+(points[i+1].x-points[i].x)*t,
+                         y:points[i].y+(points[i+1].y-points[i].y)*t)
+        }
+        return nil
+    }
 }

@@ -15,7 +15,7 @@ let package = Package(
                       "WatchFaceSupport.swift", "WatchFacePackage.swift", "CredentialStore.swift", "HWTAnalyzer.swift",
                       "HuaweiAuth.swift", "HiChainLite.swift", "P2P.swift", "PineNavigationWire.swift",
                       "RouteProgress.swift", "RouteInstruction.swift", "MotorcycleRoute.swift",
-                      "NavigationPolicy.swift", "TripRecord.swift", "FavoritePlace.swift", "NavMiniWire.swift", "WatchGuidancePresentation.swift", "MapPlaceLink.swift", "GooglePlaceIdentity.swift"]
+                      "NavigationPolicy.swift", "TripRecord.swift", "FavoritePlace.swift", "NavMiniWire.swift", "WatchGuidancePresentation.swift", "MapPlaceLink.swift", "GooglePlaceIdentity.swift", "RouteDirectionPolicy.swift"]
         ),
         .testTarget(
             name: "HuaSideloadParsingTests",

@@ -283,12 +283,16 @@ struct NavigationHomeView: View {
             HStack(alignment: .top,spacing: 14) {
                 Image(systemName: turnSymbol).font(.system(size: 34,weight: .bold))
                     .foregroundStyle(.white).frame(width: 68,height: 68)
-                    .background(LinearGradient(colors: [.blue,.cyan],startPoint: .topLeading,endPoint: .bottomTrailing),in: RoundedRectangle(cornerRadius: 20))
+                    .background(LinearGradient(colors:navigator.isOppositeDirection ? [.orange,.red] : [.blue,.cyan],startPoint: .topLeading,endPoint: .bottomTrailing),in: RoundedRectangle(cornerRadius: 20))
                 VStack(alignment: .leading,spacing: 5) {
-                    Text(navigator.isRerouting ? "ĐANG ĐỔI TUYẾN" : "TIẾP THEO")
+                    Text(navigator.isRerouting ? "ĐANG ĐỔI TUYẾN" : ((navigator.isOppositeDirection || navigator.isCheckingDeparture) ? "HƯỚNG DI CHUYỂN" : "TIẾP THEO"))
                         .font(.caption2.bold()).tracking(1.3).foregroundStyle(.secondary)
-                    Text(navigator.distanceToTurn.isEmpty ? "Đang cập nhật…" : navigator.distanceToTurn)
-                        .font(.system(.title,design: .rounded,weight: .bold))
+                    if navigator.isOppositeDirection || navigator.isCheckingDeparture {
+                        Text(navigator.isOppositeDirection ? "Kiểm tra hướng" : "Chờ hướng GPS").font(.title2.bold())
+                    } else {
+                        Text(navigator.distanceToTurn.isEmpty ? "Đang cập nhật…" : navigator.distanceToTurn)
+                            .font(.system(.title,design: .rounded,weight: .bold))
+                    }
                     Text(navigator.instruction).font(.headline).lineLimit(3)
                     if !navigator.followUpInstruction.isEmpty {
                         Text(navigator.followUpInstruction).font(.subheadline).foregroundStyle(.blue).lineLimit(2)
@@ -400,6 +404,11 @@ private struct NavigationSettingsView: View {
                 Section {
                     Toggle("Tự đổi tuyến khi đi lệch",isOn: $navigator.autoRerouteEnabled)
                 } footer: { Text("Chỉ tính lại sau khi GPS đủ chính xác và xác nhận lệch tuyến. Cần mạng để lấy tuyến mới. Chọn Xe máy để tránh dùng tuyến Ô tô.") }
+                Section {
+                    Toggle("Nhận biết đi ngược hướng tuyến",isOn:$navigator.directionCheckEnabled)
+                    Text(navigator.directionStatus).font(.footnote).foregroundStyle(.secondary)
+                } header: { Label("Hướng khởi hành",systemImage:"location.north.circle") }
+                footer: { Text("Dựa vào hướng di chuyển GPS khi bạn đang đi. Chờ nhiều vị trí chính xác trước khi báo ngược hướng; tạm bỏ qua gần chỗ rẽ, đường cong hoặc GPS yếu. Khi đứng yên, app chờ thêm dữ liệu chuyển động.") }
                 Section {
                     Toggle("Nhắc hai chỗ rẽ sát nhau",isOn:$navigator.chainedTurnsEnabled)
                     Toggle("Hướng sau chỗ rẽ ở ô tốc độ",isOn:$navigator.followingManeuverEnabled)

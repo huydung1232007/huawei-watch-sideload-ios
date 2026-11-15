@@ -317,3 +317,43 @@ start. Active navigation's panel stays unchanged. Both expanded and collapsed
 planning layouts have simulator-only fixtures; actual swipe behavior still needs
 a device check. No extra gesture-mirroring unit tests are added for this SwiftUI
 presentation change. Map, link-entry and confirmation snapshots remain in CI.
+
+
+## GPS course / opposite-route warning (1.3.6 build 20)
+
+The user requested identifying a route behind their current travel direction.
+This uses CLLocation.course/courseAccuracy, not device heading or watch pose.
+GPS course is relative to true north and independent of phone orientation:
+https://developer.apple.com/documentation/corelocation/getting-heading-and-course-information
+
+An independently testable policy compares course to a stable local forward route
+bearing. MapKit Mercator angles use east-positive x / south-positive y; meter
+lengths bound samples. A real-MapKit geometry test verifies north orientation.
+Corners/hairpins with >40-degree segment variation within 20 m are rejected.
+The caller also suppresses checking within 35 m of a planned turn (18 m walking),
+within 40 m of route end, and during GPS/off-route/reroute warnings.
+
+Usable evidence needs fresh <=6 s fixes, accuracy <=25 m, valid course accuracy
+<=35 degrees, speed >=2 m/s (0.8 walking), distinct increasing timestamps with
+no gap >3 s, and real net displacement. Opposite course >=140 degrees needs
+at least 4 s, >=3 fixes and >=8 m displacement (4 m walking). Returning within
+60 degrees requires sustained forward evidence, >=3 fixes / >=2 s while clearing
+an opposite warning, with >=4 m movement (2 m walking). Intermediate angles
+retain a confirmed warning; unavailable/unsafe evidence clears it immediately.
+There is no movement inference from a timer, repeated fix or settings refresh.
+
+On a confirmed opposite course, both phone/watch show a reverse-direction icon
+and a request to check the map. No U-turn maneuver is added to the route, no new
+haptic token or reroute request is produced, and normal turn/follow-up/ETA fields
+are suppressed for this warning. Geometric progress, route providers, normal
+GPS cadence and the existing off-route reroute policy remain unchanged.
+A valid straight departure waits for direction evidence instead of confidently
+presenting the startup arrow. Course while stationary cannot determine which
+way the user's face or wrist points; no compass/watch rotation claim is made.
+
+Default-on setting: Nhan biet di nguoc huong tuyen. Stop, route change, GPS loss,
+planned-turn context and rerouting reset the observation. Phone warning preview
+is simulator DEBUG-only and uses synthetic public-landmark data; no real wrong-way
+travel or watch/GPS hardware validation is claimed by CI. Identity-bound Google
+pin import and the collapsible route chooser confirmed by the user in 1.3.5 remain.
+The separate Nav Mini watch-app project remains paused.

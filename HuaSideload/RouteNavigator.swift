@@ -42,6 +42,25 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     @Published private(set) var distanceToTurn = ""
     @Published private(set) var followUpInstruction = ""
     @Published private(set) var remainingTripSummary = ""
+    @Published private(set) var directionState: RouteDirectionPolicy.State = .unavailable
+    @Published private(set) var isCheckingDeparture = false
+    var isOppositeDirection: Bool { directionCheckEnabled && directionState == .opposite }
+    var directionStatus: String {
+        guard directionCheckEnabled else { return "Kiểm tra hướng di chuyển: đã tắt." }
+        switch directionState {
+        case .opposite: return "Đang đi ngược hướng tuyến. Kiểm tra bản đồ."
+        case .following: return "Hướng di chuyển phù hợp tuyến."
+        case .checking: return "Đang xác nhận hướng di chuyển GPS."
+        case .unavailable: return "Chưa đủ dữ liệu hướng di chuyển GPS."
+        }
+    }
+    @Published var directionCheckEnabled = UserDefaults.standard.object(forKey:"routeDirectionCheckV1") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(directionCheckEnabled,forKey:"routeDirectionCheckV1")
+            clearDirectionObservation()
+            if let fix = currentLocation { updateGuidance(fix,force:true) }
+        }
+    }
     @Published var followingManeuverEnabled = UserDefaults.standard.object(forKey:"watchFollowingManeuverV1") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(followingManeuverEnabled,forKey:"watchFollowingManeuverV1")
@@ -122,6 +141,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private var refreshPolicy = GuidanceRefreshPolicy()
     private var alertPolicy = TurnAlertPolicy()
     private var followingManeuverPolicy = FollowingManeuverPolicy()
+    private var directionPolicy = RouteDirectionPolicy()
     private var reroutePolicy = ReroutePolicy()
     private var tripAccumulator: TripAccumulator?
     private var lastCheckpoint = Date.distantPast
@@ -270,6 +290,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     private func discardRoutes() {
+        clearDirectionObservation()
         followingManeuverPolicy.reset()
         route = nil; path = nil; maneuvers = []
         preparedRoutes = []; routeChoices = []; selectedRouteID = nil
@@ -299,6 +320,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     private func applyRoute(_ candidate: PreparedRoute) {
+        clearDirectionObservation()
         followingManeuverPolicy.reset()
         selectedRouteID = candidate.id
         route = candidate.plan; path = candidate.path; maneuvers = candidate.maneuvers
@@ -446,6 +468,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         let sessionID = navigationSession
         let transport = mode
         isRerouting = true
+        clearDirectionObservation()
         onRouteReset?()
         status = "Đang tính lại tuyến từ vị trí hiện tại…"
         emit(instruction: "Đang tìm tuyến mới…",distance: "",turn: .unspecified,force: true)
@@ -526,6 +549,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         maneuverIndex = 0; progress = 0; lastFixTime = nil
         refreshPolicy = GuidanceRefreshPolicy()
         followingManeuverPolicy.reset()
+        clearDirectionObservation()
         tripStartedAt = Date(); navigationSession = UUID()
         alertPolicy = TurnAlertPolicy(); reroutePolicy = ReroutePolicy()
         tripAccumulator = TripAccumulator(startedAt: tripStartedAt,destination: destination?.name ?? "Điểm đến",mode: mode.title,walking: mode == .walking)
@@ -551,6 +575,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
                     self.locationStatus = "GPS: sai số khoảng \(Int(fix.horizontalAccuracy)) m · vị trí cách đây \(Int(age)) giây."
                 }
                 if !NavigationFixFreshness.isFresh(timestamp: (self.currentLocation?.timestamp ?? .distantPast).timeIntervalSinceReferenceDate,now: now.timeIntervalSinceReferenceDate) {
+                    self.clearDirectionObservation()
                     self.reroutePolicy.resetObservation()
                     self.status = "GPS cập nhật chậm; đang chờ vị trí mới."
                     self.emit(instruction: "GPS chậm - chờ vị trí mới", distance: "", turn: .unspecified, force: false)
@@ -561,6 +586,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     }
 
     func stop(reason: String = "Đã dừng điều hướng.", notifyWatch: Bool = true, outcome: TripRecord.Outcome = .stopped) {
+        clearDirectionObservation()
         followingManeuverPolicy.reset()
         let wasNavigating = isNavigating
         isNavigating = false
@@ -619,19 +645,26 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             stop(reason: "Quyền vị trí không còn được cấp.")
         }
         else if isNavigating {
+            clearDirectionObservation()
             emit(instruction: "Đang chờ GPS chính xác", distance: "", turn: .unspecified, force: true)
         }
+    }
+
+    private func clearDirectionObservation() {
+        directionPolicy.reset(); directionState = .unavailable; isCheckingDeparture = false
     }
 
     private func updateGuidance(_ location: CLLocation, force: Bool = false) {
         guard isNavigating, let path, let route, !maneuvers.isEmpty else { return }
         guard NavigationFixFreshness.isFresh(timestamp: location.timestamp.timeIntervalSinceReferenceDate,now: Date().timeIntervalSinceReferenceDate) else {
+            clearDirectionObservation()
             reroutePolicy.resetObservation()
             status = "GPS cập nhật chậm; đang chờ vị trí mới."
             emit(instruction: "GPS chậm - chờ vị trí mới",distance: "",turn: .unspecified,force: force)
             return
         }
         guard location.horizontalAccuracy <= 60 else {
+            clearDirectionObservation()
             reroutePolicy.resetObservation()
             status = "GPS chưa đủ chính xác; đang chờ tín hiệu tốt hơn."
             emit(instruction: "Đang chờ GPS chính xác", distance: "", turn: .unspecified, force: force)
@@ -645,10 +678,12 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             minimum: max(0, progress - 35), maximum: min(path.totalLength, progress + window), preferred: progress) else { return }
         let offRoute = projection.crossTrack > (mode == .walking ? 45 : 70)
         if isRerouting {
+            clearDirectionObservation()
             emit(instruction: "Đang tìm tuyến mới…",distance: "",turn: .unspecified,force: force)
             return
         }
         if offRoute {
+            clearDirectionObservation()
             let request = autoRerouteEnabled && reroutePolicy.observe(offRoute: true,accuracy: location.horizontalAccuracy,now: Date().timeIntervalSinceReferenceDate)
             status = autoRerouteEnabled ? "Đang xác nhận lệch tuyến…" : "Lệch tuyến. Bấm Tính lại tuyến từ đây."
             if reroutePolicy.needsManualRetry { status = "Chưa đổi được tuyến. Bấm Tính lại tuyến để thử lại." }
@@ -670,6 +705,32 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             emit(instruction: "Đã đến " + destination.name, distance: "0 m", turn: .destination, force: true)
             stop(reason: "Đã đến điểm đến.", notifyWatch: false, outcome: .completed)
             return
+        }
+        isCheckingDeparture = false
+        if directionCheckEnabled {
+            let nearTurn = maneuvers.contains {
+                ($0.turn == .left || $0.turn == .right || $0.turn == .uTurn)
+                    && abs($0.at-progress) < (mode == .walking ? 18 : 35)
+            }
+            let bearing = path.stableForwardBearing(at:progress)
+            let contextAllowed = totalRemaining > 40 && !nearTurn && bearing != nil
+            directionState = directionPolicy.observe(.init(timestamp:location.timestamp.timeIntervalSinceReferenceDate,
+                latitude:location.coordinate.latitude,longitude:location.coordinate.longitude,
+                accuracy:location.horizontalAccuracy,speed:location.speed,course:location.course,courseAccuracy:location.courseAccuracy),
+                now:Date().timeIntervalSinceReferenceDate,routeBearing:bearing,walking:mode == .walking,contextAllowed:contextAllowed)
+            if directionState == .opposite {
+                followingManeuverPolicy.reset(); remainingTripSummary = ""
+                status = "Đang đi ngược hướng tuyến. Kiểm tra hướng trên bản đồ."
+                emit(instruction:"Đang đi ngược hướng tuyến; kiểm tra bản đồ",distance:"",turn:.uTurn,force:force)
+                return
+            }
+            let departure = maneuverIndex == 0 && next.at <= 20 && (next.turn == .straight || next.turn == .unspecified)
+            if departure && contextAllowed && directionState != .following {
+                isCheckingDeparture = true; remainingTripSummary = ""
+                status = "Đang chờ đủ chuyển động GPS để xác định hướng khởi hành."
+                emit(instruction:"Chờ xác định hướng khởi hành",distance:"",turn:.unspecified,force:force)
+                return
+            }
         }
         let secondsRemaining = route.expectedTravelTime * totalRemaining / path.totalLength
         remainingTripSummary = WatchGuidancePresentation.summary(meters:totalRemaining,seconds:secondsRemaining) ?? Self.distance(totalRemaining)
@@ -745,13 +806,20 @@ extension RouteNavigator {
         hasLocation = true; locationStatus = "GPS sẵn sàng"
         history.prepareVisualPreview()
         favorites.prepareVisualPreview()
-        if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "guidance" {
+        let preview = ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]
+        if preview == "guidance" || preview == "direction-warning" {
             instruction = "Rẽ trái vào Nguyễn Trãi"; currentTurn = .left; distanceToTurn = "120 m"
             followUpInstruction = "Sau đó rẽ phải sau 60 m"; remainingTripSummary = "3.2km · 9ph"
             status = "Dữ liệu minh họa · còn 3.2km · khoảng 9 phút"
             liveTrip = TripRecord(id:UUID(),startedAt:Date().addingTimeInterval(-600),endedAt:Date(),
                 destination:"Điểm đến minh họa",mode:"Xe máy",distance:2312,outcome:.active)
             isNavigating = true
+            if preview == "direction-warning" {
+                directionState = .opposite; currentTurn = .uTurn; distanceToTurn = ""
+                instruction = "Đang đi ngược hướng tuyến; kiểm tra bản đồ"
+                followUpInstruction = ""; remainingTripSummary = ""
+                status = "Dữ liệu minh họa · cảnh báo hướng di chuyển"
+            }
         }
     }
 }
