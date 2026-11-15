@@ -4,8 +4,90 @@ import XCTest
 final class MapPlaceLinkTests: XCTestCase {
     private let pin = MapPlaceLink.Coordinate(latitude:10.779783,longitude:106.699018)
     private let direct = "https://www.google.com/maps/search/?api=1&query=10.779783%2C106.699018"
+    private func embed(_ descriptors: [[Any]]) throws -> String {
+        let root: [Any] = [[9000,12.0,45.0],NSNull(),descriptors]
+        let json = String(decoding:try JSONSerialization.data(withJSONObject:root),as:UTF8.self)
+        return "<script>window.initEmbed("+json+", 0);</script>"
+    }
+    private func descriptor(_ id: String = "0x1:0x2",cid: String = "2",point: [Any] = [10.779783,106.699018],name: String = "Post Office") -> [Any] {
+        [id,name,point,cid]
+    }
+    func testFeatureIdentityKeepsAllUnsigned64Bits() throws {
+        let id = try XCTUnwrap(GooglePlaceIdentity(ftid:"0x0001:0xFFFFFFFFFFFFFFFF"))
+        XCTAssertEqual(id.decimalCID,"18446744073709551615")
+        XCTAssertEqual(URLComponents(url:id.embedURL,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "cid"})?.value,"18446744073709551615")
+        XCTAssertNil(GooglePlaceIdentity(ftid:"0x1:0x10000000000000000"))
+        XCTAssertNil(GooglePlaceIdentity(cid:"18446744073709551616"))
+        XCTAssertNil(GooglePlaceIdentity(cid:"0"))
+    }
+    func testIdentityRequestDoesNotCarryFuzzyNameOrTracking() throws {
+        let url = try MapPlaceLink.url(from:"https://maps.google.com?q=Wrong+Branch&ftid=0x1:0x2&g_st=ic")
+        let id = try XCTUnwrap(GooglePlaceIdentity.from(url))
+        let parts = try XCTUnwrap(URLComponents(url:id.embedURL,resolvingAgainstBaseURL:false))
+        XCTAssertEqual(parts.host,"www.google.com")
+        XCTAssertEqual(Set(parts.queryItems!.map(\.name)),Set(["cid","output","hl"]))
+        XCTAssertEqual(parts.queryItems?.first(where:{$0.name == "output"})?.value,"embed")
+    }
+    func testEmbedIdentityMatchedPinWinsOverDistantViewport() throws {
+        let id = try XCTUnwrap(GooglePlaceIdentity(ftid:"0x1:0x2"))
+        XCTAssertEqual(try id.pin(inHTML:embed([descriptor()])),.coordinate(pin,name:"Post Office"))
+        let cidOnly = try XCTUnwrap(GooglePlaceIdentity(cid:"2"))
+        XCTAssertEqual(try cidOnly.pin(inHTML:embed([descriptor()])),.coordinate(pin,name:"Post Office"))
+    }
+    func testEmbedRejectsWrongFeatureCIDAndConflictingPins() throws {
+        let id = try XCTUnwrap(GooglePlaceIdentity(ftid:"0x1:0x2"))
+        for record in [descriptor("0x3:0x2"),descriptor(cid:"3"),descriptor("0x1:0x3",cid:"3")] {
+            XCTAssertNil(try id.pin(inHTML:embed([record])))
+        }
+        XCTAssertThrowsError(try id.pin(inHTML:embed([descriptor(),descriptor(point:[11,107])])))
+        XCTAssertEqual(try id.pin(inHTML:embed([descriptor(),descriptor()])),.coordinate(pin,name:"Post Office"))
+    }
+    func testEmbedJsonReaderHandlesEscapesAndDoesNotExecuteScript() throws {
+        let id = try XCTUnwrap(GooglePlaceIdentity(ftid:"0x1:0x2"))
+        let name = "Post ] Office \\\"test\\\""
+        XCTAssertEqual(try id.pin(inHTML:embed([descriptor(name:name)])+"<script>throw 'not executed';</script>"),.coordinate(pin,name:name))
+        XCTAssertNil(try id.pin(inHTML:"<script>initEmbed([null,"))
+        XCTAssertNil(try id.pin(inHTML:"<script>initEmbed(window.secret)</script>"))
+        XCTAssertNil(try id.pin(inHTML:"<meta property='og:image' content='https://maps.google.com/?center=11,107'>"))
+    }
+    func testEmbedCoordinateBoundsAndTypesAreChecked() throws {
+        let id = try XCTUnwrap(GooglePlaceIdentity(ftid:"0x1:0x2"))
+        XCTAssertThrowsError(try id.pin(inHTML:embed([descriptor(point:[91,106])])))
+        XCTAssertThrowsError(try id.pin(inHTML:embed([descriptor(point:[10,181])])))
+        XCTAssertNil(try id.pin(inHTML:embed([descriptor(point:[true,106])])))
+        XCTAssertNil(try id.pin(inHTML:embed([descriptor(point:["10","106"])])))
+    }
+    func testInvalidOrConflictingSourceIdentitiesCannotFallBackToName() async {
+        let resolver = MapPlaceLinkResolver { _ in XCTFail("Invalid IDs must not be requested"); return .init(status:200) }
+        for query in ["ftid=bad", "ftid=0x1:0x2&cid=3", "ftid=0x1:0x2&ftid=0x1:0x3", "cid=18446744073709551616"] {
+            do { _ = try await resolver.resolve("https://maps.google.com/?q=Wrong+Branch&"+query); XCTFail("Must reject identity") }
+            catch { XCTAssertTrue(error is MapPlaceLink.LinkError) }
+        }
+    }
+    func testVerifiedIdentitySurvivesEmbedRedirect() async throws {
+        let html = try embed([descriptor()])
+        let resolver = MapPlaceLinkResolver { url in
+            if url.path == "/maps" { return .init(status:302,location:"https://www.google.com/maps/embed?pb=synthetic") }
+            XCTAssertEqual(url.path,"/maps/embed")
+            return .init(status:200,html:html)
+        }
+        let value = try await resolver.resolve("https://maps.google.com/?q=Wrong+Branch&ftid=0x1:0x2")
+        XCTAssertEqual(value,.coordinate(pin,name:"Post Office"))
+    }
+    func testMissingIdentityPinNeverReturnsFuzzyNameOrViewport() async {
+        for html in ["<script>initEmbed([[100,12,45]])</script>", "<meta property='og:url' content='https://maps.google.com/?q=11,107'>"] {
+            let resolver = MapPlaceLinkResolver { _ in .init(status:200,html:html) }
+            do { _ = try await resolver.resolve("https://maps.google.com/?q=Wrong+Branch&ftid=0x1:0x2"); XCTFail("Must not guess a pin") }
+            catch { XCTAssertTrue(error is MapPlaceLink.LinkError) }
+        }
+    }
     private func target(_ text: String) throws -> MapPlaceLink.Target? {
         try MapPlaceLink.target(from:MapPlaceLink.url(from:text))
+    }
+    func testCopiedMarkdownAndRepeatedSameLinkRemainUsable() throws {
+        XCTAssertEqual(try target("["+direct+"]("+direct+")"),.coordinate(pin,name:nil))
+        XCTAssertEqual(try target(direct+"\n"+direct),.coordinate(pin,name:nil))
+        XCTAssertThrowsError(try MapPlaceLink.url(from:"[bad](https://evil.example/maps?q=10,106)"))
     }
     func testOfficialCoordinateQueryAndSharedText() throws {
         XCTAssertEqual(try target(direct),.coordinate(pin,name:nil))
@@ -86,9 +168,15 @@ final class MapPlaceLinkTests: XCTestCase {
         XCTAssertEqual(value,.search("Post Office"))
         // Same query/ftid shape as the real sample, using only a public landmark
         // and a synthetic identifier; no user link/address is published.
-        let query = MapPlaceLinkResolver { _ in .init(status:302,location:"https://maps.google.com?q=B%C6%B0u+%C4%91i%E1%BB%87n+Trung+t%C3%A2m,+H%E1%BB%93+Ch%C3%AD+Minh&ftid=0x1:0x2&g_st=ic") }
-        let address = try await query.resolve("https://maps.app.goo.gl/testToken?g_st=ic")
-        XCTAssertEqual(address,.search("Bưu điện Trung tâm, Hồ Chí Minh"))
+        let html = try embed([descriptor()])
+        let query = MapPlaceLinkResolver { url in
+            if url.host == "maps.app.goo.gl" {
+                return .init(status:302,location:"https://maps.google.com?q=B%C6%B0u+%C4%91i%E1%BB%87n+Trung+t%C3%A2m,+H%E1%BB%93+Ch%C3%AD+Minh&ftid=0x1:0x2&g_st=ic")
+            }
+            return .init(status:200,html:html)
+        }
+        let exact = try await query.resolve("https://maps.app.goo.gl/testToken?g_st=ic")
+        XCTAssertEqual(exact,.coordinate(pin,name:"Post Office"))
     }
     func testRedirectToUnapprovedHostCannotBeFetched() async {
         let resolver = MapPlaceLinkResolver { url in

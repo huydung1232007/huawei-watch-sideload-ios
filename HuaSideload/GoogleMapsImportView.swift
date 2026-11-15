@@ -60,7 +60,7 @@ struct GoogleMapsImportView: View {
                         .accessibilityIdentifier("place-link-resolve")
                     if loading { Button("Hủy tìm",role:.cancel) { cancel() } }
                 } header: { Text("Liên kết địa điểm") } footer: {
-                    Text("Link rút gọn cần mạng để mở. App sẽ tính tuyến tới điểm bạn xác nhận bằng phương tiện đang chọn.")
+                    Text("Link rút gọn cần mạng để mở. Link có mã địa điểm sẽ được đối chiếu để lấy ghim Google Maps. Kiểm tra ghim trước khi chọn dẫn đường hoặc lưu yêu thích.")
                 }
                 if !message.isEmpty {
                     Section { Text(message).font(.callout).foregroundStyle(isError ? Color.red : Color.secondary) }

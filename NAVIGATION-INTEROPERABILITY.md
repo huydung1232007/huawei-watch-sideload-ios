@@ -273,3 +273,29 @@ that Google's internal share-link encoding is a stable documented API.
 The route engine and existing Apple-map/watch navigation remain unchanged.
 There is no Google navigation capture/OCR or display demo. Nav Mini stays paused.
 CI fixtures show the link-entry/confirmation UI only in simulator DEBUG builds.
+
+
+## Identity-bound Google pin fix (1.3.5 build 19)
+
+The user reported that the 1.3.4 import did not find the place or showed a wrong
+pin. A name/address lookup cannot identify a branch reliably. Links with ftid/cid
+now request the public Google Maps web embed for that exact CID before any name
+search. IDs use UInt64, never Double/Int64, to preserve all bits. The JSON-only
+initEmbed reader requires the feature ID and decimal CID in a point descriptor
+to match the requested identity. Camera/viewport/static-map centers, unrelated
+markers, conflicting pins and invalid numeric types/bounds are rejected. If an
+identity-bound pin cannot be verified, the app reports an error rather than
+returning name-search candidates. Links with no identity retain the explicit
+user-selection flow; plain coordinate links still work without a network fetch.
+
+A local probe of the real sample with the same iPhone User-Agent obtained one
+matching pin from the public embed, with coordinates distinct from the unrelated
+normal map viewport. No user link, address, ID, coordinate or downloaded web page
+is committed. Tests use synthetic identities and public-landmark coordinates.
+Only the JSON array is decoded; website JavaScript is never executed or copied.
+Copied Markdown links and duplicate copies of the same URL are also accepted.
+
+This reads a currently observed web format, not the key-based Embed API v1 or a
+stable Google Places API contract. No API key or authenticated endpoint is used.
+Existing cancellation, bounded body/timeouts/redirect hosts and mandatory map
+confirmation remain. The native Nav Mini project remains paused.

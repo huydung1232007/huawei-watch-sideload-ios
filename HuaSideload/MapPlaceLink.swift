@@ -12,7 +12,7 @@ enum MapPlaceLink {
         case search(String)
     }
     enum LinkError: LocalizedError {
-        case invalidLink,invalidCoordinate,unresolved,network,tooManyRedirects
+        case invalidLink,invalidCoordinate,unresolved,network,tooManyRedirects,exactPinUnavailable
         var errorDescription: String? {
             switch self {
             case .invalidLink: return "Dán một liên kết địa điểm Google Maps hợp lệ."
@@ -20,15 +20,23 @@ enum MapPlaceLink {
             case .unresolved: return "Chưa đọc được địa điểm từ link này. Thử sao chép lại liên kết của một ghim hoặc tìm bằng tên/địa chỉ."
             case .network: return "Chưa mở được liên kết. Kiểm tra mạng rồi thử lại."
             case .tooManyRedirects: return "Liên kết chuyển tiếp quá nhiều lần. Thử sao chép lại link địa điểm."
+            case .exactPinUnavailable: return "Chưa xác minh được ghim chính xác của địa điểm này. Thử sao chép liên kết của ghim trong Google Maps rồi dán lại."
             }
         }
     }
 
     static func url(from text: String) throws -> URL {
         guard text.utf8.count <= 16_384 else { throw LinkError.invalidLink }
+        let trimmed = text.trimmingCharacters(in:.whitespacesAndNewlines)
+        let markdown = try NSRegularExpression(pattern:#"^\[[^\]\r\n]*\]\((https?://[^\s<>]+)\)$"#)
+        if let match = markdown.firstMatch(in:trimmed,range:NSRange(trimmed.startIndex...,in:trimmed)),
+           let range = Range(match.range(at:1),in:trimmed),let url = URL(string:String(trimmed[range])) {
+            return try validated(url)
+        }
         let detector = try NSDataDetector(types:NSTextCheckingResult.CheckingType.link.rawValue)
         let matches = detector.matches(in:text,range:NSRange(text.startIndex...,in:text))
-        guard matches.count == 1,let url = matches.first?.url else { throw LinkError.invalidLink }
+        let urls = Set(matches.compactMap(\.url))
+        guard urls.count == 1,let url = urls.first else { throw LinkError.invalidLink }
         return try validated(url)
     }
 
@@ -182,10 +190,17 @@ struct MapPlaceLinkResolver {
     private func resolveLink(_ text: String) async throws -> MapPlaceLink.Target {
         var url = try MapPlaceLink.url(from:text)
         var visited = Set<String>()
+        var identity: GooglePlaceIdentity?
         for _ in 0..<6 {
             try Task.checkCancellation()
             guard visited.insert(url.absoluteString).inserted else { throw MapPlaceLink.LinkError.tooManyRedirects }
-            if let target = try MapPlaceLink.target(from:url) { return target }
+            if identity == nil {
+                if let id = try GooglePlaceIdentity.from(url) {
+                    identity = id; url = id.embedURL
+                    continue
+                }
+                if let target = try MapPlaceLink.target(from:url) { return target }
+            }
             let page: Page
             do { page = try await fetch(url) }
             catch is CancellationError { throw CancellationError() }
@@ -197,6 +212,10 @@ struct MapPlaceLinkResolver {
                 continue
             }
             guard page.status == 200 else { throw MapPlaceLink.LinkError.network }
+            if let identity {
+                guard let html = page.html,let pin = try identity.pin(inHTML:html) else { throw MapPlaceLink.LinkError.exactPinUnavailable }
+                return pin
+            }
             if let html = page.html,let target = try MapPlaceLink.target(inHTML:html) { return target }
             throw MapPlaceLink.LinkError.unresolved
         }
