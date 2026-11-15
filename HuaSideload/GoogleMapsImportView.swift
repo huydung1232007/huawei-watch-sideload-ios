@@ -43,7 +43,7 @@ struct GoogleMapsImportView: View {
                     Text("Trong Google Maps, chọn địa điểm → Chia sẻ → Sao chép liên kết. Dán bên dưới để xem ghim trước khi chọn.")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
-                Section("Liên kết địa điểm") {
+                Section {
                     TextField("https://maps.app.goo.gl/…",text:$input,axis:.vertical)
                         .lineLimit(3...6).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .keyboardType(.URL).accessibilityIdentifier("place-link-input")
@@ -59,7 +59,7 @@ struct GoogleMapsImportView: View {
                     }.disabled(loading || input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("place-link-resolve")
                     if loading { Button("Hủy tìm",role:.cancel) { cancel() } }
-                } footer: {
+                } header: { Text("Liên kết địa điểm") } footer: {
                     Text("Link rút gọn cần mạng để mở. App sẽ tính tuyến tới điểm bạn xác nhận bằng phương tiện đang chọn.")
                 }
                 if !message.isEmpty {

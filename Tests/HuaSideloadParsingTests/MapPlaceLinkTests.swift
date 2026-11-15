@@ -84,6 +84,11 @@ final class MapPlaceLinkTests: XCTestCase {
         let resolver = MapPlaceLinkResolver { _ in .init(status:302,location:"https://www.google.com/maps/place/Post+Office/") }
         let value = try await resolver.resolve("https://goo.gl/maps/testToken")
         XCTAssertEqual(value,.search("Post Office"))
+        // Same query/ftid shape as the real sample, using only a public landmark
+        // and a synthetic identifier; no user link/address is published.
+        let query = MapPlaceLinkResolver { _ in .init(status:302,location:"https://maps.google.com?q=B%C6%B0u+%C4%91i%E1%BB%87n+Trung+t%C3%A2m,+H%E1%BB%93+Ch%C3%AD+Minh&ftid=0x1:0x2&g_st=ic") }
+        let address = try await query.resolve("https://maps.app.goo.gl/testToken?g_st=ic")
+        XCTAssertEqual(address,.search("Bưu điện Trung tâm, Hồ Chí Minh"))
     }
     func testRedirectToUnapprovedHostCannotBeFetched() async {
         let resolver = MapPlaceLinkResolver { url in
