@@ -4,6 +4,8 @@ import SwiftUI
 struct SelectedMapPin: Identifiable {
     let id = UUID()
     let coordinate: CLLocationCoordinate2D
+    var name: String? = nil
+    var title = "Ghim trên bản đồ"
 }
 
 struct MapPinDestinationView: View {
@@ -14,6 +16,11 @@ struct MapPinDestinationView: View {
     @State private var name = "Điểm đã ghim"
     private var trimmedName: String { name.trimmingCharacters(in:.whitespacesAndNewlines) }
     private var validName: Bool { !trimmedName.isEmpty && trimmedName.count <= 60 }
+
+    init(pin: SelectedMapPin,navigator: RouteNavigator,favorites: FavoritePlacesStore) {
+        self.pin = pin; self.navigator = navigator; self.favorites = favorites
+        _name = State(initialValue:pin.name ?? "Điểm đã ghim")
+    }
 
     var body: some View {
         NavigationStack {
@@ -49,7 +56,7 @@ struct MapPinDestinationView: View {
                     Section { Text(message).font(.footnote).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Ghim trên bản đồ").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(pin.title).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement:.topBarTrailing) { Button("Hủy") { dismiss() } } }
         }
     }

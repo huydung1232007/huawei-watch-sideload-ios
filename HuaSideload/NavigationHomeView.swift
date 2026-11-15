@@ -11,6 +11,7 @@ struct NavigationHomeView: View {
     @State private var showingFavorites = false
     @State private var captureFavoriteOnOpen = false
     @State private var selectedPin: SelectedMapPin?
+    @State private var importingPlace = false
 
     var body: some View {
         MapReader { proxy in
@@ -47,12 +48,16 @@ struct NavigationHomeView: View {
         .sheet(item:$selectedPin) { pin in
             MapPinDestinationView(pin:pin,navigator:navigator,favorites:navigator.favorites)
         }
+        .sheet(isPresented:$importingPlace) {
+            GoogleMapsImportView(navigator:navigator,favorites:navigator.favorites)
+        }
         .onAppear {
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("favorite") == true { showingFavorites = true }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "pin" {
                 selectedPin = SelectedMapPin(coordinate:.init(latitude:10.77645,longitude:106.70092))
             }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("place-link") == true { importingPlace = true }
             #endif
         }
         .onChange(of: navigator.routeRevision) { _, _ in
@@ -134,8 +139,14 @@ struct NavigationHomeView: View {
                 .padding(13).background(Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 16))
             }
             .buttonStyle(.plain)
-            Label("Nhấn giữ bản đồ để ghim vị trí",systemImage:"hand.tap")
-                .font(.caption2).foregroundStyle(.secondary)
+            HStack {
+                Label("Nhấn giữ để ghim bản đồ",systemImage:"hand.tap")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer(minLength:8)
+                Button { importingPlace = true } label: { Label("Dán link",systemImage:"link") }
+                    .font(.caption.bold()).buttonStyle(.bordered).disabled(navigator.isCalculating)
+                    .accessibilityLabel("Dán link địa điểm").accessibilityIdentifier("import-place-link")
+            }
             Picker("Phương tiện",selection: $navigator.mode) {
                 Label("Xe máy",systemImage: "motorcycle").tag(RouteNavigator.Mode.motorcycle)
                 Label("Đi bộ",systemImage: "figure.walk").tag(RouteNavigator.Mode.walking)

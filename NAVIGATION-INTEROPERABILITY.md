@@ -239,3 +239,37 @@ turn text and the confirmed alternating total km/minute field are preserved.
 This is an interoperability experiment: a P2P ACK does not prove arrow glyphs
 or the unit caption render correctly in this watch client's speed field. Device
 confirmation is required. Native Nav Mini development remains paused.
+
+
+## Google Maps place-link import (1.3.4 build 18)
+
+The planning screen opens a paste/import sheet. System PasteButton or manual
+paste is user initiated; there is no background clipboard polling. A coordinate
+link opens a confirmation map/name editor. A name/address-only link runs Apple
+MKLocalSearch and requires selecting a result before map confirmation. Route
+selection and favorites change only through explicit confirmation actions.
+Resolving, editing input and cancelling never select or calculate a destination.
+Closing/changing input cancels HTTP/local search and invalidates late results.
+
+Supported inputs include Google Maps search/place URLs, explicit directions
+endpoints and maps.app.goo.gl / goo.gl/maps short links. The resolver follows at
+most six validated Google Maps redirects, with no cookies, a bounded HTML body,
+per-request timeouts and a 25-second overall cancellation deadline. Direct pin
+coordinates require no network. Canonical/og:url metadata may recover a pin.
+Viewport @lat,lon, ll/center and Street View are never used as destinations.
+Unknown place IDs and ambiguous pins fall back to a readable error rather than
+an invented coordinate. Name/address matches remain user-selected candidates.
+Country domains are explicitly limited to those in MapPlaceLink.validated.
+
+A real user-supplied short link was locally observed to redirect to a Google Maps
+name/address query with ftid, without explicit pin coordinates. It uses the
+name/address selection flow. The user's link, address, HTML and identifiers are
+not committed or embedded in the build. Unit tests use synthetic/public examples.
+Public API URL syntax reference:
+https://developers.google.com/maps/documentation/urls/get-started
+The legacy !3d/!4d reader is a conservative interoperability fallback, not a claim
+that Google's internal share-link encoding is a stable documented API.
+
+The route engine and existing Apple-map/watch navigation remain unchanged.
+There is no Google navigation capture/OCR or display demo. Nav Mini stays paused.
+CI fixtures show the link-entry/confirmation UI only in simulator DEBUG builds.
