@@ -299,3 +299,21 @@ This reads a currently observed web format, not the key-based Embed API v1 or a
 stable Google Places API contract. No API key or authenticated endpoint is used.
 Existing cancellation, bounded body/timeouts/redirect hosts and mandatory map
 confirmation remain. The native Nav Mini project remains paused.
+
+
+## Collapsible route-planning card (also 1.3.5)
+
+The user additionally requested swiping the large planning card down to see more
+of the map while comparing routes. Once route options exist, the card has a
+visible handle with a toggle button. A deliberate vertical drag (>35pt, dominant
+over horizontal movement) collapses downward or expands upward. Horizontal route
+card swipes remain available. The compact view keeps destination, selected-route
+distance/time, Start, one button per alternative and OSM attribution. Selecting a
+compact route uses the same existing atomic route selection and map reframing.
+Folding/unfolding never calculates/replaces a route or changes watch guidance.
+
+The card resets to expanded for a new destination, a cleared plan or navigation
+start. Active navigation's panel stays unchanged. Both expanded and collapsed
+planning layouts have simulator-only fixtures; actual swipe behavior still needs
+a device check. No extra gesture-mirroring unit tests are added for this SwiftUI
+presentation change. Map, link-entry and confirmation snapshots remain in CI.

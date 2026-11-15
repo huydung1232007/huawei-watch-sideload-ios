@@ -12,6 +12,9 @@ struct NavigationHomeView: View {
     @State private var captureFavoriteOnOpen = false
     @State private var selectedPin: SelectedMapPin?
     @State private var importingPlace = false
+    @State private var panelCollapsed = false
+    private var canCollapsePanel: Bool { !navigator.isNavigating && navigator.hasRoute && !navigator.isCalculating && !navigator.routeChoices.isEmpty }
+    private var isCompactPanel: Bool { canCollapsePanel && panelCollapsed }
 
     var body: some View {
         MapReader { proxy in
@@ -58,19 +61,29 @@ struct NavigationHomeView: View {
                 selectedPin = SelectedMapPin(coordinate:.init(latitude:10.77645,longitude:106.70092))
             }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("place-link") == true { importingPlace = true }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "map-collapsed" { panelCollapsed = true }
             #endif
         }
-        .onChange(of: navigator.routeRevision) { _, _ in
-            guard let line = navigator.displayPolyline else { return }
-            let rect = line.boundingMapRect
-            withAnimation(.easeInOut(duration: 0.5)) {
-                if navigator.isNavigating { camera = .userLocation(followsHeading: true,fallback: .automatic) }
-                else { camera = .rect(rect.insetBy(dx: -max(1000,rect.width*0.15),dy: -max(1000,rect.height*0.2))) }
-            }
-        }
+        .onChange(of:navigator.routeRevision) { _,_ in frameSelectedRoute() }
+        .onChange(of:panelCollapsed) { _,_ in frameSelectedRoute() }
+        .onChange(of:navigator.destination?.id) { _,_ in panelCollapsed = false }
+        .onChange(of:navigator.hasRoute) { _,ready in if !ready { panelCollapsed = false } }
         .onChange(of: navigator.isNavigating) { _, active in
-            if active { withAnimation { camera = .userLocation(followsHeading: true,fallback: .automatic) } }
+            if active { panelCollapsed = false; withAnimation { camera = .userLocation(followsHeading: true,fallback: .automatic) } }
         }
+    }
+
+    private func frameSelectedRoute() {
+        guard let line = navigator.displayPolyline else { return }
+        let rect = line.boundingMapRect
+        withAnimation(.easeInOut(duration:0.4)) {
+            if navigator.isNavigating { camera = .userLocation(followsHeading:true,fallback:.automatic) }
+            else { camera = .rect(rect.insetBy(dx:-max(1000,rect.width*0.15),dy:-max(1000,rect.height*0.2))) }
+        }
+    }
+    private func setPanelCollapsed(_ collapsed: Bool) {
+        guard canCollapsePanel else { return }
+        withAnimation(.spring(response:0.32,dampingFraction:0.9)) { panelCollapsed = collapsed }
     }
 
     private var header: some View {
@@ -99,9 +112,11 @@ struct NavigationHomeView: View {
 
     private var bottomPanel: some View {
         VStack(alignment: .leading,spacing: 14) {
+            if canCollapsePanel { panelHandle }
             if navigator.isNavigating { activePanel }
+            else if isCompactPanel { compactPlanningPanel }
             else { planningPanel }
-            HStack {
+            if !isCompactPanel { HStack {
                 Button {
                     captureFavoriteOnOpen = false; showingFavorites = true
                 } label: { Label("Yêu thích",systemImage:"star.fill") }
@@ -109,7 +124,7 @@ struct NavigationHomeView: View {
                 Button {
                     captureFavoriteOnOpen = true; showingFavorites = true
                 } label: { Label("Lưu GPS",systemImage:"location.circle") }
-            }.font(.subheadline).buttonStyle(.borderless)
+            }.font(.subheadline).buttonStyle(.borderless) }
             if navigator.mode == .motorcycle {
                 Link("Tuyến © OpenStreetMap contributors",destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                     .font(.system(size: 10)).foregroundStyle(.secondary)
@@ -119,7 +134,57 @@ struct NavigationHomeView: View {
         .background(.regularMaterial,in: RoundedRectangle(cornerRadius: 28,style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.3),lineWidth: 1))
         .shadow(color: .black.opacity(0.12),radius: 18,y: 5)
+        .simultaneousGesture(DragGesture(minimumDistance:20).onEnded { gesture in
+            let x = gesture.translation.width,y = gesture.translation.height
+            guard abs(y) > 35,abs(y) > abs(x)*1.35 else { return }
+            setPanelCollapsed(y > 0)
+        })
         .padding(.horizontal,12).padding(.bottom,12)
+    }
+
+    private var panelHandle: some View {
+        Button { setPanelCollapsed(!panelCollapsed) } label: {
+            ZStack {
+                Capsule().fill(Color.secondary.opacity(0.4)).frame(width:36,height:4)
+                HStack {
+                    Spacer()
+                    Text(isCompactPanel ? "Mở rộng" : "Thu gọn").font(.caption2.bold())
+                    Image(systemName:isCompactPanel ? "chevron.up" : "chevron.down").font(.caption2.bold())
+                }.foregroundStyle(.secondary)
+            }.frame(height:24).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .accessibilityLabel(isCompactPanel ? "Mở rộng khung chọn tuyến" : "Thu gọn khung để xem bản đồ")
+            .accessibilityHint("Có thể vuốt lên hoặc xuống trên khung")
+            .accessibilityIdentifier("route-panel-toggle")
+    }
+
+    private var compactPlanningPanel: some View {
+        VStack(alignment:.leading,spacing:10) {
+            HStack(spacing:12) {
+                VStack(alignment:.leading,spacing:4) {
+                    Text(navigator.destination?.name ?? "Điểm đến").font(.headline).lineLimit(1)
+                    if let selected = navigator.routeChoices.first(where:{ $0.id == navigator.selectedRouteID }) {
+                        Text(selected.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                Spacer(minLength:0)
+                Button { link.startRouteNavigation() } label: {
+                    Label("Bắt đầu",systemImage:"location.north.fill").font(.subheadline.bold()).padding(.vertical,6)
+                }.buttonStyle(.borderedProminent)
+                    .disabled(!link.isPaired || link.commandsLocked || navigator.isCalculating)
+            }
+            HStack(spacing:8) {
+                ForEach(navigator.routeChoices) { route in
+                    let selected = route.id == navigator.selectedRouteID
+                    Button { navigator.selectRoute(route.id) } label: {
+                        Text(route.title).font(.subheadline.bold()).frame(maxWidth:.infinity).padding(.vertical,10)
+                            .foregroundStyle(selected ? Color.white : Color.primary)
+                            .background(selected ? Color.blue : Color(.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:12))
+                    }.buttonStyle(.plain).disabled(link.commandsLocked)
+                        .accessibilityValue(selected ? "Đang chọn" : "Chưa chọn")
+                }
+            }
+        }.accessibilityIdentifier("route-panel-compact")
     }
 
     private var planningPanel: some View {
