@@ -59,7 +59,7 @@ final class DestinationSearchModel: NSObject, ObservableObject, MKLocalSearchCom
         guard completer === source,phase == .suggesting || phase == .suggestions else { return }
         suggestionTimeout?.cancel(); suggestionTimeout = nil
         var seen = Set<String>()
-        suggestions = source.results.compactMap { value in
+        suggestions = source.results.compactMap { value -> Suggestion? in
             let item = Suggestion(title:value.title,subtitle:value.subtitle,completion:value)
             return seen.insert(item.id).inserted ? item : nil
         }.prefix(10).map { $0 }

@@ -56,15 +56,6 @@ jobs:
           HUASIDELOAD_TEAM_ID: ""
         run: ./generate.sh
 
-      - name: Start simulator warmup
-        continue-on-error: true
-        run: |
-          xcrun simctl list runtimes
-          SIM_ID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; keys=sorted(d,key=lambda k:("iOS-26" not in k,k)); candidates=[v for k in keys if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")]; booted=[v for v in candidates if v["state"]=="Booted"]; print((booted or candidates)[0]["udid"])')
-          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-          xcrun simctl boot "$SIM_ID" || true
-          open -a Simulator --args -CurrentDeviceUDID "$SIM_ID" || true
-
       - name: Build (no code signing)
         run: |
           set -o pipefail
@@ -100,6 +91,15 @@ jobs:
             HuaSideload-unsigned.ipa
             HuaSideload-unsigned.ipa.sha256
             info-plist.txt
+
+      - name: Start simulator warmup
+        continue-on-error: true
+        run: |
+          xcrun simctl list runtimes
+          SIM_ID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; keys=sorted(d,key=lambda k:("iOS-26" not in k,k)); candidates=[v for k in keys if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")]; booted=[v for v in candidates if v["state"]=="Booted"]; print((booted or candidates)[0]["udid"])')
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$SIM_ID" || true
+          open -a Simulator --args -CurrentDeviceUDID "$SIM_ID" || true
 
       - name: Render navigation and history UI in simulator
         timeout-minutes: 12
