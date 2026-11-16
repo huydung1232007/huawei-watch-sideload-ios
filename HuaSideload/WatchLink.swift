@@ -200,6 +200,11 @@ final class WatchLink: NSObject, ObservableObject {
         // watch and relaunches the app for its Bluetooth events, so notifications and the watch's buttons keep working
         #if DEBUG && targetEnvironment(simulator)
         if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] != nil {
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "fresh-pin" {
+                bluetoothState = "On"; connectedName = "HUAWEI WATCH GT 2 Pro"
+                pairingStage = .liteAuthenticating; busy = "Pairing…"
+                return
+            }
             isPaired = true; connectedName = "HUAWEI WATCH GT 2 Pro"; battery = 78; pairingStage = .paired
             routeNavigator.prepareVisualPreview()
             return
@@ -370,6 +375,28 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     var canRetryConnection: Bool { retryDevice != nil && !isConnecting && busy == nil && !isPaired }
+
+    // Proactive PIN recovery also interrupts an old-key handshake. Do not wait
+    // for its timeout, interrupt an established connection, or restart a fresh
+    // PIN request already in flight. connect() cancels the old command and waits
+    // for the actual BLE disconnect before starting the replacement handshake.
+    var canRequestFreshPIN: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "fresh-pin" { return true }
+        #endif
+        guard retryDevice != nil, central.state == .poweredOn, !isPaired, pendingDevice == nil else { return false }
+        if refreshLitePINOnConnect {
+            return !isConnecting && busy == nil && (peripheral == nil || peripheral?.state == .disconnected)
+        }
+        return true
+    }
+
+    func reconnectWithFreshPIN() {
+        guard canRequestFreshPIN, let device = retryDevice else { return }
+        append(.info, "User requested a fresh PIN; cancelling the previous connection attempt without waiting for its timeout")
+        refreshLitePINOnConnect = true
+        connect(device)
+    }
 
     // Explicit recovery: never deletes credentials, resets the watch, or loops bonding.
     func retryConnection(refreshPIN: Bool) {

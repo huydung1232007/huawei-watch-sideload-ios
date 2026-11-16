@@ -122,6 +122,28 @@ final class HuaweiSessionConnectionTests: XCTestCase {
         XCTAssertEqual(watch.secrets.values["lite.secret.watch"], watch.oldKey.hexCompact)
     }
 
+    func testFreshPINCanReplaceAnInFlightSavedPINHandshakeWithoutWaitingForTimeout() async {
+        let watch = WatchHarness(); defer { watch.cleanup() }
+        watch.answerAuth = false
+        let previous = Task { try await watch.session.pair(watch: "watch") }
+        for _ in 0..<1000 where !watch.commands.contains(0x13) { await Task.yield() }
+        XCTAssertEqual(watch.commands, [0x01, 0x33, 0x13])
+        previous.cancel()
+        watch.session.reset()
+        do { try await previous.value; XCTFail("Cancelled handshake succeeded") } catch {}
+        XCTAssertFalse(watch.session.liteAuthenticationFailedWithSavedPIN)
+
+        watch.answerAuth = true
+        watch.acceptAuth = true
+        do { try await watch.session.pair(watch: "watch", refreshLitePIN: true); XCTFail("Malformed BondParams accepted") } catch {}
+        XCTAssertEqual(watch.commands, [0x01, 0x33, 0x13, 0x01, 0x33, 0x2C, 0x13, 0x0F])
+        XCTAssertTrue(watch.freshPINIssued)
+        XCTAssertTrue(watch.stages.contains(.liteBonding))
+        XCTAssertFalse(watch.session.liteAuthenticationFailedWithSavedPIN)
+        XCTAssertEqual(watch.secrets.values["lite.pin.watch"], watch.oldPIN.hexCompact)
+        XCTAssertEqual(watch.secrets.values["lite.secret.watch"], watch.oldKey.hexCompact)
+    }
+
     func testFreshPINRejectedDoesNotErasePreviousCredentialsOrBond() async {
         let watch = WatchHarness(); defer { watch.cleanup() }
         do { try await watch.session.pair(watch: "watch", refreshLitePIN: true); XCTFail("Invalid authentication accepted") } catch {}

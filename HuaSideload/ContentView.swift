@@ -78,6 +78,7 @@ struct ContentView: View {
             if filmMode { link.revealIdentity = false }
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "history" { tab = .history }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "fresh-pin" { tab = .watch }
             #endif
         }
         .onChange(of: filmMode) { _, on in if on { link.revealIdentity = false } }
@@ -133,22 +134,26 @@ struct ContentView: View {
 
     @ViewBuilder
     private var connectionRecoverySection: some View {
-        if let issue = link.connectionIssue {
-            Section {
+        Section {
+            if let issue = link.connectionIssue {
                 Label(issue, systemImage: "exclamationmark.triangle")
                     .font(.footnote).foregroundStyle(.orange)
-                if link.canRefreshLitePIN {
-                    Text("PIN đã lưu có thể không còn khớp sau khi dùng Huawei Health. Thử lấy PIN mới; xác nhận trên đồng hồ nếu được hỏi.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button("Lấy PIN mới và kết nối") { link.retryConnection(refreshPIN: true) }
-                        .disabled(!link.canRetryConnection)
-                }
+            }
+            Button { link.reconnectWithFreshPIN() } label: {
+                Label("Lấy PIN mới và kết nối", systemImage: "key.horizontal")
+            }
+            .disabled(!link.canRequestFreshPIN)
+            if link.connectionIssue != nil {
                 Button("Kết nối lại") { link.retryConnection(refreshPIN: false) }
                     .disabled(!link.canRetryConnection)
-            } header: {
-                Text("Khôi phục kết nối")
-            } footer: {
-                Text("Đóng hẳn Huawei Health và các bản HuaSideload khác trước khi thử. Không cần xóa ghép nối hoặc reset đồng hồ. Nếu vừa mở lại app, chọn đồng hồ trong Find watch trước.")
+            }
+        } header: {
+            Text("Kết nối nhanh")
+        } footer: {
+            if link.isPaired {
+                Text("Đồng hồ đã kết nối. Nếu cần lấy PIN mới, bấm Disconnect trước.")
+            } else {
+                Text("Có thể bấm ngay khi đang kết nối hoặc chờ xác thực bằng PIN cũ, không cần đợi báo lỗi. Đóng Huawei Health và xác nhận trên đồng hồ nếu được hỏi. Nếu chưa chọn đồng hồ, vào Find watch trước.")
             }
         }
     }

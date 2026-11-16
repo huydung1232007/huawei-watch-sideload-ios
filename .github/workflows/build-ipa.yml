@@ -139,6 +139,10 @@ jobs:
           SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW=place-link-preview xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
           sleep 3
           xcrun simctl io "$SIM_ID" screenshot place-link-preview-ui.png
+          xcrun simctl terminate "$SIM_ID" com.example.huasideload.lite
+          SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW=fresh-pin xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
+          sleep 3
+          xcrun simctl io "$SIM_ID" screenshot fresh-pin-ui.png
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -155,6 +159,7 @@ jobs:
             direction-warning-ui.png
             place-link-ui.png
             place-link-preview-ui.png
+            fresh-pin-ui.png
             ui-build.log
 
       - uses: actions/upload-artifact@v4
