@@ -35,6 +35,7 @@ struct ContentView: View {
             page("Đồng hồ") {
                 statusSection
                 connectionRecoverySection
+                if !filmMode { identityDiagnosticsSection }
                 if link.connectedName == nil && !link.isConnecting {
                     devicesSection
                 } else {
@@ -197,6 +198,27 @@ struct ContentView: View {
         }
     }
 
+    private var identityDiagnosticsSection: some View {
+        Section {
+            Label(link.identityEvidence.identityState.label,
+                  systemImage: link.watchUDID == nil ? "info.circle" : "checkmark.circle")
+                .font(.footnote)
+            Button("Đọc thông tin cài đặt") { link.readIdentityDiagnostics() }
+                .disabled(!link.isPaired || link.commandsLocked)
+            Button("Sao chép báo cáo") {
+                UIPasteboard.general.string = link.identityEvidence.report()
+            }
+            DisclosureGroup("Xem báo cáo") {
+                Text(link.identityEvidence.report()).font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text("UDID & chẩn đoán")
+        } footer: {
+            Text("Báo cáo chỉ gồm mã giao thức, độ dài trường và phiên bản API; không chứa số sê-ri, MAC, PIN, khóa hoặc giá trị UDID. Đọc thông tin không ghép nối lại đồng hồ.")
+        }
+    }
+
     private var devicesSection: some View {
         Section {
             Button(link.isScanning ? L("Scanning…", "Aranıyor…") : L("Find watch", "Saati ara")) { link.startScan() }
@@ -277,7 +299,7 @@ struct ContentView: View {
             if let progress = link.watchAppProgress {
                 ProgressView(value: progress) { Text(L("Uploading… \(Int(progress * 100))%", "Yükleniyor… %\(Int(progress * 100))")) }
             }
-            if filmMode, let status = link.appInstallStatus, link.watchAppProgress == nil {
+            if let status = link.appInstallStatus, link.watchAppProgress == nil {
                 Label(status.text, systemImage: status.ok == true ? "checkmark.circle.fill" : status.ok == false ? "xmark.octagon.fill" : "hourglass")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(status.ok == true ? .green : status.ok == false ? .red : .secondary)

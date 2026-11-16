@@ -38,6 +38,7 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var watchAppProgress: Double?
     @Published private(set) var installedApps: [WatchApps.Installed] = []
     @Published private(set) var watchUDID: String?
+    @Published private(set) var identityEvidence = WatchIdentityEvidence()
     @Published private(set) var connectionIssue: String?
     @Published private(set) var canRefreshLitePIN = false
     @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
@@ -134,11 +135,20 @@ final class WatchLink: NSObject, ObservableObject {
             self.append(.info, L("The watch asked for song info: \(fileName) → \(meta.title)", "Saat şarkı bilgisini sordu: \(fileName) → \(meta.title)"))
         }
         session.onPairingStage = { [weak self] stage in self?.pairingStage = stage }
+        session.onIdentityEvidence = { [weak self] evidence in
+            guard let self else { return }
+            let phase = self.identityEvidence.installPhase
+            let status = self.identityEvidence.installStatus
+            self.identityEvidence = evidence
+            self.identityEvidence.installPhase = phase
+            self.identityEvidence.installStatus = status
+        }
         session.onWatchFaceConfirm = { [weak self] report in self?.watchFaceConfirmed(report) }
         session.onAppInstallStatus = { [weak self] status, package in
             let kind: LogKind = status == 102 ? .success : (status == 103 || status == 106 ? .error : .info)
             self?.append(kind, "⌚ Saat: \(WatchApps.describeStatus(status)) \(package)")
             self?.lastInstallStatus = status
+            self?.identityEvidence.installStatus = status
         }
         session.onAppMessage = { [weak self] source, data in
             guard let self else { return }
@@ -397,6 +407,8 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func resetConnectionState() {
+        watchUDID = nil
+        identityEvidence = WatchIdentityEvidence()
         connectionID = UUID()
         isConnecting = false
         commandState.reset()
@@ -663,6 +675,15 @@ final class WatchLink: NSObject, ObservableObject {
         run(L("Reading…", "Okunuyor…")) { session in try await self.refreshInfo(session) }
     }
 
+    // Only repeats the existing read-only AppPlatform query. Never renegotiates
+    // security, rotates a PIN, sends account setup or uploads an application.
+    func readIdentityDiagnostics() {
+        guard isPaired else { return }
+        run("Đọc thông tin ứng dụng đồng hồ…") { session in
+            _ = try await session.appPlatform()
+        }
+    }
+
     func sendMessage(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -845,6 +866,8 @@ final class WatchLink: NSObject, ObservableObject {
 
     // Installs a signed watch app bundled in the iPhone app (WatchApps/*.bin) on the watch
     func installWatchApp(_ app: BundledWatchApp) {
+        identityEvidence.installPhase = "upload requested"
+        identityEvidence.installStatus = nil
         watchAppProgress = 0
         appInstallStatus = AppInstallStatus(text: L("Sending \(app.name) to the watch…", "\(app.name) saate gönderiliyor…"), ok: nil)
         run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…")) { session in
@@ -859,9 +882,15 @@ final class WatchLink: NSObject, ObservableObject {
                 self.append(.info, L("Watch app platform: ", "Saatin uygulama platformu: ") + WatchApps.describeParams(platform))
             }
             self.lastInstallStatus = nil
-            try await session.uploadFile(app.data, name: app.package + "_INSTALL", type: FileUpload.FileType.app) { fraction in
-                self.watchAppProgress = fraction
+            do {
+                try await session.uploadFile(app.data, name: app.package + "_INSTALL", type: FileUpload.FileType.app) { fraction in
+                    self.watchAppProgress = fraction
+                }
+            } catch {
+                self.identityEvidence.installPhase = "transfer failed"
+                throw error
             }
+            self.identityEvidence.installPhase = "transfer complete; installing"
             self.append(.success, L("Transfer finished, waiting for the watch to install…", "Dosya aktarımı bitti, saatin kurulumu bekleniyor…"))
             self.appInstallStatus = AppInstallStatus(text: L("The watch is installing \(app.name)…", "Saat \(app.name) uygulamasını kuruyor…"), ok: nil)
             // Wait up to 90 s for the watch to report 102 (installed) or 103 (failed)
@@ -872,8 +901,8 @@ final class WatchLink: NSObject, ObservableObject {
                 self.installedApps = apps
                 let mine = apps.contains { $0.package == app.package }
                 self.append(mine ? .success : .error, mine ? L("\(app.name) is installed on the watch 🎉", "\(app.name) saatte kurulu 🎉")
-                            : L("\(app.name) is not on the watch. For error 103 see README > Troubleshooting",
-                                "\(app.name) saatin listesinde yok. 103 hatası için README > Troubleshooting"))
+                            : "\(app.name) chưa có trong danh sách ứng dụng. Xem trạng thái cài và báo cáo chẩn đoán.")
+                self.identityEvidence.installPhase = mine && self.lastInstallStatus != 103 ? "listed as installed" : "not installed"
                 // 103 wins: an older build of the same package may still be on the watch
                 if self.lastInstallStatus == 103 {
                     self.appInstallStatus = AppInstallStatus(text: L("The watch rejected \(app.name): 103", "Saat \(app.name) uygulamasını reddetti: 103"), ok: false)

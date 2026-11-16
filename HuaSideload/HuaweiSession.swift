@@ -52,6 +52,8 @@ final class HuaweiSession {
     private(set) var link: LinkInfo?
     private(set) var isPaired = false
     private(set) var watchUDID: String?
+    private(set) var identityEvidence = WatchIdentityEvidence()
+    var onIdentityEvidence: ((WatchIdentityEvidence) -> Void)?
     private var sessionKey: [UInt8]?
     private var liteCounter: UInt32?
     private(set) var isLitePairing = false
@@ -128,6 +130,8 @@ final class HuaweiSession {
     }
 
     func reset() {
+        watchUDID = nil
+        identityEvidence = WatchIdentityEvidence()
         finishUpload(HuaweiSessionError.disconnected)
         let p2p = p2pWaiters
         p2pWaiters.removeAll()
@@ -353,6 +357,9 @@ final class HuaweiSession {
     // HuaweiSupportProvider: LinkParams -> SecurityNegotiation -> (PinCode + HiChain op 1) -> HiChain op 2
     func pair(watch: String, refreshLitePIN: Bool = false) async throws {
         try Task.checkCancellation()
+        watchUDID = nil
+        identityEvidence = WatchIdentityEvidence()
+        onIdentityEvidence?(identityEvidence)
         isPaired = false
         liteAuthenticationFailedWithSavedPIN = false
         sessionKey = nil
@@ -366,6 +373,8 @@ final class HuaweiSession {
         guard let linkTLV = linkResponse.tlv else { throw HuaweiAuthError.unexpected("LinkParams TLV") }
         let link = LinkInfo(linkTLV)
         self.link = link
+        identityEvidence.recordLink(link)
+        onIdentityEvidence?(identityEvidence)
         log(.info, "Auth \(link.authVersion), support type \(link.deviceSupportType), \(link.usesGCM ? "AES-GCM" : "AES-CBC")")
         if diagnostics {
             log(.info, "Diag link: protocol \(link.protocolVersion), slice \(link.sliceSize), mtu \(link.mtu), auth version \(link.authVersion), "
@@ -383,9 +392,11 @@ final class HuaweiSession {
                                                                         encryptMethod: link.encryptMethod),
                                             label: L("2/4 Security negotiation", "2/4 Güvenlik müzakeresi"), encrypted: false)
         guard let negotiationTLV = negotiation.tlv else { throw HuaweiAuthError.unexpected("SecurityNegotiation TLV") }
-        // The watch sends its UDID (needed for debug profiles) in tag 0x05 as ASCII hex
-        if let udid = negotiationTLV.value(0x05), udid.count == 64 {
-            watchUDID = String(decoding: udid, as: UTF8.self)
+        // Accept only a validated identity from the known reply field; report
+        // unsupported/missing formats without turning other bytes into a UDID.
+        watchUDID = identityEvidence.recordSecurity(negotiationTLV)
+        onIdentityEvidence?(identityEvidence)
+        if watchUDID != nil {
             log(.info, L("Got the watch UDID (see Status)", "Saatin UDID'si alındı (Durum bölümünde)"))
         }
         let authType = SecurityNegotiation.authType(negotiationTLV)
@@ -589,9 +600,19 @@ final class HuaweiSession {
     }
 
     func appPlatform() async throws -> HuaweiTLV {
-        let response = try await request(WatchApps.serviceId, WatchApps.paramsCommand, HuaweiTLV().with(0x81), label: L("App platform", "Uygulama platformu"))
-        guard let tlv = response.tlv else { throw HuaweiAuthError.unexpected("AppInfoParams TLV") }
-        return tlv
+        do {
+            let response = try await request(WatchApps.serviceId, WatchApps.paramsCommand, HuaweiTLV().with(0x81), label: L("App platform", "Uygulama platformu"))
+            guard let tlv = response.tlv else { throw HuaweiAuthError.unexpected("AppInfoParams TLV") }
+            identityEvidence.recordPlatform(tlv)
+            onIdentityEvidence?(identityEvidence)
+            return tlv
+        } catch {
+            if !Task.isCancelled {
+                identityEvidence.platformUnavailable()
+                onIdentityEvidence?(identityEvidence)
+            }
+            throw error
+        }
     }
 
     func installedApps() async throws -> [WatchApps.Installed] {

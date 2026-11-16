@@ -26,6 +26,7 @@ final class HuaweiSessionConnectionTests: XCTestCase {
         var acceptAuth = false
         var answerAuth = true
         var freshPINIssued = false
+        var negotiationIdentity: [UInt8]?
 
         init() {
             defaults = UserDefaults(suiteName: suite)!
@@ -48,6 +49,7 @@ final class HuaweiSessionConnectionTests: XCTestCase {
                 tlv = tlv.with(0x05, [0, 1] + nonce).with(0x07, [2]).with(0x08, [0])
             case 0x33:
                 tlv = tlv.with(0x02, [1])
+                if let negotiationIdentity { tlv = tlv.with(0x05, negotiationIdentity) }
             case 0x2C:
                 freshPINIssued = true
                 let iv = [UInt8](repeating: 0x55, count: 16)
@@ -81,6 +83,21 @@ final class HuaweiSessionConnectionTests: XCTestCase {
         XCTAssertEqual(watch.secrets.values["lite.secret.watch"], watch.oldKey.hexCompact)
         XCTAssertFalse(watch.session.isPaired)
         XCTAssertTrue(watch.stages.contains(.liteAuthenticating))
+    }
+
+    func testDisconnectClearsAnIdentityFromThePreviousSession() async {
+        let watch = WatchHarness(); defer { watch.cleanup() }
+        watch.negotiationIdentity = Array(String(repeating: "0123456789ABCDEF", count: 4).utf8)
+        do { try await watch.session.pair(watch: "watch") } catch {}
+        XCTAssertNotNil(watch.session.watchUDID)
+        XCTAssertEqual(watch.session.identityEvidence.identityState, .recognized)
+        watch.session.reset()
+        XCTAssertNil(watch.session.watchUDID)
+        XCTAssertEqual(watch.session.identityEvidence.identityState, .notRead)
+        watch.negotiationIdentity = nil
+        do { try await watch.session.pair(watch: "watch") } catch {}
+        XCTAssertNil(watch.session.watchUDID)
+        XCTAssertEqual(watch.session.identityEvidence.identityState, .missing)
     }
 
     func testSavedPINTimeoutOffersRecoveryAndDoesNotBond() async {
