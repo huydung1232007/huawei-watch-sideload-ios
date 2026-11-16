@@ -63,12 +63,19 @@ jobs:
           shasum -a 256 nav-mini-output/NavMini-unsigned.bin > nav-mini-output/NavMini-unsigned.bin.sha256
           printf '%s\n' 'UNSIGNED BUILD. Not installable on a retail watch. Requires a valid Huawei-issued certificate and matching profile. Personal signing files must stay local. No signature bypass is included.' > nav-mini-output/READ-ME-FIRST.txt
           python3 - <<'PY'
-          import importlib.util
+          import importlib.util, json
           spec = importlib.util.spec_from_file_location('checker','tools/check-watch-bin.py')
           checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
           bundle, errors, notes = checker.check('nav-mini-output/NavMini-unsigned.bin')
           assert bundle == 'com.huydung1232007.navmini'
           assert errors == ['not signed (hap-sign-tool sign-app -inForm bin)'],errors
+          from pathlib import Path
+          _, files, _ = checker.entries(Path('nav-mini-output/NavMini-unsigned.bin').read_bytes())
+          config = json.loads(files['config.json'])
+          assert config['app']['apiVersion'] == {'compatible': 3, 'target': 3}
+          assert config['app']['version'] == {'code': 1000002, 'name': '1.0.2'}
+          manifest = json.loads(files['/assets/js/default/manifest.json'])
+          assert manifest['minPlatformVersion'] == 3
           print('Package structure valid; only the expected missing-signature check remains.')
           PY
       - uses: actions/upload-artifact@v4

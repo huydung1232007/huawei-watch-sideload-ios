@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.huydung1232007.navmini",
     "vendor": "Personal",
-    "version": { "code": 1000001, "name": "1.0.1" },
-    "apiVersion": { "compatible": 6, "target": 6 }
+    "version": { "code": 1000002, "name": "1.0.2" },
+    "apiVersion": { "compatible": 3, "target": 3 }
   },
   "deviceConfig": {},
   "module": {
