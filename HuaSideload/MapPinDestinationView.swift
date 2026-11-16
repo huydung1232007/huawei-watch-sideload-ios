@@ -14,11 +14,14 @@ struct MapPinDestinationView: View {
     @ObservedObject var favorites: FavoritePlacesStore
     @Environment(\.dismiss) private var dismiss
     @State private var name = "Điểm đã ghim"
+    private let onlyStopover: Bool
+    private let onBack: (() -> Void)?
     private var trimmedName: String { name.trimmingCharacters(in:.whitespacesAndNewlines) }
     private var validName: Bool { !trimmedName.isEmpty && trimmedName.count <= 60 }
 
-    init(pin: SelectedMapPin,navigator: RouteNavigator,favorites: FavoritePlacesStore) {
+    init(pin: SelectedMapPin,navigator: RouteNavigator,favorites: FavoritePlacesStore,onlyStopover: Bool = false,onBack: (() -> Void)? = nil) {
         self.pin = pin; self.navigator = navigator; self.favorites = favorites
+        self.onlyStopover = onlyStopover; self.onBack = onBack
         _name = State(initialValue:pin.name ?? "Điểm đã ghim")
     }
 
@@ -38,6 +41,7 @@ struct MapPinDestinationView: View {
                     if !validName { Text("Nhập tên từ 1 đến 60 ký tự.").font(.caption).foregroundStyle(.red) }
                 }
                 Section {
+                  if !onlyStopover {
                     Button {
                         guard validName,!navigator.isNavigating,!navigator.isCalculating else { return }
                         let item = MKMapItem(placemark:MKPlacemark(coordinate:pin.coordinate)); item.name = trimmedName
@@ -45,6 +49,7 @@ struct MapPinDestinationView: View {
                     } label: { Label("Đi tới đây",systemImage:"location.north.fill") }
                     .disabled(!validName || navigator.isNavigating || navigator.isCalculating)
                     .accessibilityIdentifier("pin-route")
+                  }
                     if navigator.destination != nil {
                         Button {
                             guard validName,navigator.canAddStopover else { return }
@@ -65,7 +70,10 @@ struct MapPinDestinationView: View {
                 }
             }
             .navigationTitle(pin.title).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement:.topBarTrailing) { Button("Hủy") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement:.topBarTrailing) { Button("Hủy") { dismiss() } }
+                if let onBack { ToolbarItem(placement:.topBarLeading) { Button("Quay lại",action:onBack) } }
+            }
         }
     }
 }

@@ -76,6 +76,7 @@ struct NavigationHomeView: View {
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "map-collapsed" { panelCollapsed = true }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "stopovers" { showingStops = true }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "navigation-settings" { settings = true }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("search-") == true { searching = true }
             #endif
         }
         .onDisappear { shareTask?.cancel(); shareTask = nil; shareOpeningID = nil }
@@ -391,57 +392,6 @@ struct NavigationHomeView: View {
         case .destination: return "flag.checkered"
         case .straight: return "arrow.up"
         case .unspecified: return "location.fill"
-        }
-    }
-}
-
-struct DestinationSearchView: View {
-    @ObservedObject var navigator: RouteNavigator
-    var addingStop = false
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    TextField("Tên địa điểm hoặc địa chỉ",text: $navigator.query)
-                        .submitLabel(.search).onSubmit { navigator.searchDestination() }
-                    Button { navigator.searchDestination() } label: {
-                        HStack { if navigator.isSearching { ProgressView() }; Label("Tìm địa điểm",systemImage: "magnifyingglass") }
-                    }.disabled(navigator.isSearching || navigator.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                Section {
-                    if addingStop, !navigator.favorites.places.isEmpty {
-                        ForEach(navigator.favorites.places) { place in
-                            Button {
-                                let item = MKMapItem(placemark:MKPlacemark(coordinate:.init(latitude:place.latitude,longitude:place.longitude)))
-                                item.name = place.name; navigator.addStopover(.init(item:item)); dismiss()
-                            } label: { Label(place.name,systemImage:"star.fill") }
-                        }
-                    }
-                    ForEach(navigator.results) { place in
-                        Button {
-                            if addingStop { navigator.addStopover(place) } else { navigator.selectAndCalculate(place) }
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(.orange)
-                                VStack(alignment: .leading,spacing: 4) {
-                                    Text(place.name).font(.headline).foregroundStyle(.primary)
-                                    Text(place.address).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }.padding(.vertical,4)
-                        }
-                    }
-                    if navigator.results.isEmpty { Text(navigator.status).font(.callout).foregroundStyle(.secondary) }
-                }
-                Section {
-                    Button("Lấy vị trí hiện tại") { navigator.requestLocation() }
-                    Text(navigator.locationStatus).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle(addingStop ? "Thêm điểm dừng" : "Điểm đến").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Xong") { dismiss() } } }
-            .task { if !navigator.hasLocation { navigator.requestLocation() } }
         }
     }
 }

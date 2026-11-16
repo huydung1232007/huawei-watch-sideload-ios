@@ -30,9 +30,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         let turn: PineNavigationWire.Turn
     }
 
-    @Published var query = ""
     @Published var mode: Mode = .motorcycle { didSet { if mode != oldValue { clearPlan() } } }
-    @Published private(set) var results: [Destination] = []
     @Published private(set) var destination: Destination?
     @Published private(set) var stopovers: [Destination] = []
     @Published private(set) var completedStopCount = 0
@@ -91,7 +89,6 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             if let fix = currentLocation { updateGuidance(fix,force:true) }
         }
     }
-    @Published private(set) var isSearching = false
     @Published private(set) var isCalculating = false
     @Published private(set) var isNavigating = false
     @Published private(set) var isRerouting = false
@@ -125,7 +122,6 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private let manager = CLLocationManager()
     private var waitingForLocation = false
     private var currentLocation: CLLocation?
-    private var search: MKLocalSearch?
     private var directions: MKDirections?
     private struct Plan { let polyline: MKPolyline; let distance: Double; let expectedTravelTime: Double }
     private struct StopBoundary {
@@ -254,39 +250,15 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         if !isNavigating { manager.stopUpdatingLocation(); manager.distanceFilter = 5 }
     }
 
-    func searchDestination() {
-        guard !isNavigating else { return }
-        let text = String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        guard !text.isEmpty else { return }
-        search?.cancel()
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = text
-        if let location = currentLocation {
-            request.region = MKCoordinateRegion(center: location.coordinate,
-                latitudinalMeters: 30_000, longitudinalMeters: 30_000)
-        }
-        let operation = MKLocalSearch(request: request)
-        search = operation
-        isSearching = true
-        status = "Đang tìm điểm đến…"
-        Task {
-            do {
-                let response = try await operation.start()
-                guard self.search === operation else { return }
-                self.results = response.mapItems.prefix(8).map { Destination(item: $0) }
-                self.status = self.results.isEmpty ? "Không tìm thấy. Thử tên hoặc địa chỉ cụ thể hơn." : "Chọn đúng địa chỉ trong kết quả."
-            } catch {
-                guard self.search === operation else { return }
-                self.status = "Không tìm được địa điểm: \(error.localizedDescription)"
-            }
-            if self.search === operation { self.isSearching = false }
-        }
+    var destinationSearchRegion: MKCoordinateRegion? {
+        guard let location = currentLocation,location.horizontalAccuracy >= 0,
+              location.horizontalAccuracy <= 500,Date().timeIntervalSince(location.timestamp) < 300 else { return nil }
+        return MKCoordinateRegion(center:location.coordinate,latitudinalMeters:30_000,longitudinalMeters:30_000)
     }
 
     func select(_ value: Destination) {
         clearPlan()
         destination = value
-        results = []
         status = "Đã chọn \(value.name). Bấm Tính tuyến đường."
     }
 
@@ -322,7 +294,6 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         guard canAddStopover else { return }
         clearPlan()
         stopovers.append(value)
-        results = []
         status = "Đã thêm điểm dừng. Bấm Xong hoặc Tính tuyến đường để cập nhật hành trình."
     }
 
@@ -354,10 +325,9 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     func clearDestination() {
         guard !isNavigating else { return }
         // Invalidate pending requests before clearing their visible results.
-        // A late search/route reply must not restore a discarded preview.
-        search?.cancel(); search = nil; isSearching = false
+        // A late route reply must not restore a discarded preview.
         clearPlan()
-        destination = nil; stopovers = []; query = ""; results = []
+        destination = nil; stopovers = []
         waitingForLocation = false
         if let sharedPlace { consumedSharedPlace(sharedPlace.id) }
         currentTurn = .unspecified; liveTrip = nil

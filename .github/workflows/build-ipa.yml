@@ -56,6 +56,15 @@ jobs:
           HUASIDELOAD_TEAM_ID: ""
         run: ./generate.sh
 
+      - name: Start simulator warmup
+        continue-on-error: true
+        run: |
+          xcrun simctl list runtimes
+          SIM_ID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; keys=sorted(d,key=lambda k:("iOS-26" not in k,k)); candidates=[v for k in keys if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")]; booted=[v for v in candidates if v["state"]=="Booted"]; print((booted or candidates)[0]["udid"])')
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$SIM_ID" || true
+          open -a Simulator --args -CurrentDeviceUDID "$SIM_ID" || true
+
       - name: Build (no code signing)
         run: |
           set -o pipefail
@@ -97,8 +106,6 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project HuaSideload.xcodeproj -target HuaSideload -configuration Debug -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG SYMROOT="$PWD/ui-build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > ui-build.log 2>&1
-          SIM_ID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; keys=sorted(d,key=lambda k:("iOS-26" not in k,k)); candidates=[v for k in keys if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")]; print(candidates[0]["udid"])')
-          xcrun simctl boot "$SIM_ID" || true
           python3 -c 'import subprocess,sys; subprocess.run(["xcrun","simctl","bootstatus",sys.argv[1],"-b"],check=True,timeout=240)' "$SIM_ID"
           xcrun simctl ui "$SIM_ID" appearance light
           xcrun simctl install "$SIM_ID" ui-build/Debug-iphonesimulator/HuaSideload.app
@@ -149,7 +156,7 @@ jobs:
           sleep 3
           xcrun simctl io "$SIM_ID" screenshot fresh-pin-ui.png
           xcrun simctl terminate "$SIM_ID" com.example.huasideload.lite
-          for PREVIEW in stopovers navigation-settings map-cleared; do
+          for PREVIEW in stopovers navigation-settings map-cleared search-suggestions search-results search-preview; do
             SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW="$PREVIEW" xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
             sleep 3
             xcrun simctl io "$SIM_ID" screenshot "$PREVIEW-ui.png"
@@ -180,6 +187,9 @@ jobs:
             navigation-settings-ui.png
             map-cleared-ui.png
             shared-place-ui.png
+            search-suggestions-ui.png
+            search-results-ui.png
+            search-preview-ui.png
             ui-build.log
 
       - uses: actions/upload-artifact@v4
