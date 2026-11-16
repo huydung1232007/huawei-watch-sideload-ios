@@ -201,6 +201,7 @@ struct NavigationHomeView: View {
                     Label("Bắt đầu",systemImage:"location.north.fill").font(.subheadline.bold()).padding(.vertical,6)
                 }.buttonStyle(.borderedProminent)
                     .disabled(!link.isPaired || link.commandsLocked || navigator.isCalculating)
+                clearDestinationButton
             }
             HStack(spacing:8) {
                 ForEach(navigator.routeChoices) { route in
@@ -218,6 +219,7 @@ struct NavigationHomeView: View {
 
     private var planningPanel: some View {
         Group {
+          HStack(spacing:8) {
             Button { searching = true } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass").font(.title3).foregroundStyle(.blue)
@@ -233,6 +235,8 @@ struct NavigationHomeView: View {
                 .padding(13).background(Color(.secondarySystemGroupedBackground),in: RoundedRectangle(cornerRadius: 16))
             }
             .buttonStyle(.plain)
+            if navigator.destination != nil { clearDestinationButton }
+          }
             HStack {
                 Button { showingStops = true } label: {
                     Label(navigator.stopovers.isEmpty ? "Thêm điểm dừng" : "\(navigator.stopovers.count) điểm dừng",systemImage:"point.topleft.down.to.point.bottomright.curvepath")
@@ -274,6 +278,22 @@ struct NavigationHomeView: View {
                 }.buttonStyle(.borderedProminent)
             }
         }
+    }
+
+    private var clearDestinationButton: some View {
+        Button(role:.destructive) {
+            shareTask?.cancel(); shareTask = nil; shareOpeningID = nil
+            withAnimation {
+                navigator.clearDestination(); panelCollapsed = false
+                camera = .userLocation(followsHeading:false,fallback:.automatic)
+            }
+        } label: {
+            Image(systemName:"trash").font(.body)
+                .frame(width:40,height:44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(.secondary)
+        .accessibilityLabel("Xóa điểm đến và tuyến đang xem")
+        .accessibilityIdentifier("clear-destination")
     }
 
     private var routeChoices: some View {

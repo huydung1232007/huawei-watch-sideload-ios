@@ -32,8 +32,8 @@ targets:
       path: HuaSideload/Info.plist
       properties:
         CFBundleDisplayName: HuaSideload Lite Test
-        CFBundleShortVersionString: "1.5.0"
-        CFBundleVersion: "27"
+        CFBundleShortVersionString: "1.5.1"
+        CFBundleVersion: "28"
         CFBundleURLTypes:
           - CFBundleURLName: huasideload.maps
             CFBundleURLSchemes: [huasideload]
@@ -60,8 +60,8 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: HuaSideload
-        CFBundleShortVersionString: "1.5.0"
-        CFBundleVersion: "27"
+        CFBundleShortVersionString: "1.5.1"
+        CFBundleVersion: "28"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).MapShareViewController

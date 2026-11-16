@@ -351,6 +351,19 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         discardRoutes()
     }
 
+    func clearDestination() {
+        guard !isNavigating else { return }
+        // Invalidate pending requests before clearing their visible results.
+        // A late search/route reply must not restore a discarded preview.
+        search?.cancel(); search = nil; isSearching = false
+        clearPlan()
+        destination = nil; stopovers = []; query = ""; results = []
+        waitingForLocation = false
+        if let sharedPlace { consumedSharedPlace(sharedPlace.id) }
+        currentTurn = .unspecified; liveTrip = nil
+        status = "Chọn điểm đến và xem tuyến đường trước khi bắt đầu."
+    }
+
     private func discardRoutes() {
         clearDirectionObservation()
         followingManeuverPolicy.reset()
@@ -974,6 +987,7 @@ extension RouteNavigator {
         history.prepareVisualPreview()
         favorites.prepareVisualPreview()
         let preview = ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]
+        if preview == "map-cleared" { clearDestination() }
         if preview == "stopovers" {
             stopovers = [("Bưu điện Trung tâm",10.779783,106.699018),("Hồ Con Rùa",10.7824,106.6956)].map { name,lat,lon in
                 let item = MKMapItem(placemark:MKPlacemark(coordinate:.init(latitude:lat,longitude:lon)))
