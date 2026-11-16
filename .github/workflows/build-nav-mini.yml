@@ -61,7 +61,7 @@ jobs:
           mkdir -p nav-mini-output
           cp watch-apps/nav-mini/build/out/unsigned.bin nav-mini-output/NavMini-unsigned.bin
           shasum -a 256 nav-mini-output/NavMini-unsigned.bin > nav-mini-output/NavMini-unsigned.bin.sha256
-          printf '%s\n' 'UNSIGNED BUILD. Not installable on a retail watch. Requires Huawei debug certificate and watch-specific profile. No signature bypass is included.' > nav-mini-output/READ-ME-FIRST.txt
+          printf '%s\n' 'UNSIGNED BUILD. Not installable on a retail watch. Requires a valid Huawei-issued certificate and matching profile. Personal signing files must stay local. No signature bypass is included.' > nav-mini-output/READ-ME-FIRST.txt
           python3 - <<'PY'
           import importlib.util
           spec = importlib.util.spec_from_file_location('checker','tools/check-watch-bin.py')

@@ -95,7 +95,10 @@ def check(path):
         if info.get("bundle-name") != bundle:
             errors.append(f"the profile's package ({info.get('bundle-name')}) does not match the app")
         devices = profile.get("debug-info", {}).get("device-ids", [])
-        notes.append(f"profile: {profile.get('type')}, {len(devices)} device UDID(s) (your watch's UDID must be one of them)")
+        if profile.get('type') == 'debug':
+            notes.append(f"profile: debug, {len(devices)} device UDID(s) (your watch's UDID must be one of them)")
+        else:
+            notes.append(f"profile: {profile.get('type')}, distribution {profile.get('app-distribution-type', 'unspecified')}; firmware installation remains to be tested")
     return bundle, errors, notes
 
 

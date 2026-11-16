@@ -1,5 +1,5 @@
 <div class="container">
-    <text class="title">NAV MINI - BAN THU</text>
+    <text class="title">nghuydung - BAN THU</text>
     <text class="status">{{status}}</text>
     <div class="turn"><text class="arrow">{{arrow}}</text><text class="distance">{{distance}}</text></div>
     <text class="instruction">{{instruction}}</text>
