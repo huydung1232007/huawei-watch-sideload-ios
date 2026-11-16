@@ -290,9 +290,10 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         status = "Đã chọn \(value.name). Bấm Tính tuyến đường."
     }
 
-    func receiveSharedPlace(_ value: MapShareEnvelope) {
-        guard value.id.uuidString != UserDefaults.standard.string(forKey:"lastHandledMapShareV1") else { return }
+    @discardableResult func receiveSharedPlace(_ value: MapShareEnvelope) -> Bool {
+        guard value.id.uuidString != UserDefaults.standard.string(forKey:"lastHandledMapShareV1"),sharedPlace?.id != value.id else { return false }
         sharedPlace = value
+        return true
     }
 
     func consumedSharedPlace(_ id: UUID) {

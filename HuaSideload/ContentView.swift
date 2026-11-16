@@ -88,7 +88,7 @@ struct ContentView: View {
             receiveSharedMapClipboard()
         }
         .onOpenURL { url in
-            if let place = try? MapShareEnvelope.fromAppURL(url) { tab = .navigation; link.routeNavigator.receiveSharedPlace(place) }
+            if let place = try? MapShareEnvelope.fromAppURL(url),link.routeNavigator.receiveSharedPlace(place) { tab = .navigation }
         }
     }
 
@@ -97,7 +97,7 @@ struct ContentView: View {
         guard clipboard.contains(pasteboardTypes:[MapShareEnvelope.pasteboardType]),
               let data = clipboard.data(forPasteboardType:MapShareEnvelope.pasteboardType),
               let place = try? MapShareEnvelope.decode(data) else { return }
-        tab = .navigation; link.routeNavigator.receiveSharedPlace(place)
+        if link.routeNavigator.receiveSharedPlace(place) { tab = .navigation }
     }
 
     // One tab: a list with the title and the shared toolbar (filming mode, language)

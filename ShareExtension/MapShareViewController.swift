@@ -58,7 +58,7 @@ final class MapShareViewController: UIViewController {
             UTType.url.identifier:URL(string:envelope.link)!]],
             options:[.localOnly:true,.expirationDate:Date().addingTimeInterval(600)])
         message.text = "Đã nhận địa điểm"
-        detail.text = "Mở HuaSideload để xem ghim và chọn tuyến. Cho phép dán khi iOS hỏi. Bạn cũng có thể thêm địa điểm này làm điểm dừng."
+        detail.text = "Mở HuaSideload trong 10 phút để xem ghim và chọn tuyến. Cho phép dán khi iOS hỏi. Bạn cũng có thể thêm địa điểm này làm điểm dừng."
     }
     private func load(_ provider: NSItemProvider,type: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
