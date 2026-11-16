@@ -6,6 +6,8 @@ enum PairingStage: Equatable {
     case none
     case channelReady
     case negotiating            // link parameters and security negotiation
+    case liteAuthenticating
+    case liteBonding
     case pinProcessed
     case hiChain                // HiChain authentication / binding in progress
     case authenticated          // HiChain finished, the connection is encrypted
@@ -22,6 +24,8 @@ enum PairingStage: Equatable {
         case .none: return L("None", "Yok")
         case .channelReady: return L("Channel ready, not paired", "Kanal hazır, eşleşilmedi")
         case .negotiating: return L("Negotiating security…", "Güvenlik müzakere ediliyor…")
+        case .liteAuthenticating: return "Lite 2/4 · Đang xác thực…"
+        case .liteBonding: return "Lite 3–4/4 · Đang thiết lập kết nối…"
         case .pinProcessed: return L("PIN processed, confirm on the watch…", "PIN işlendi, saatte onayla…")
         case .hiChain: return L("Authenticating (HiChain)…", "Doğrulanıyor (HiChain)…")
         case .authenticated: return L("Authenticated, setup not finished", "Doğrulandı, kurulum bitmedi")

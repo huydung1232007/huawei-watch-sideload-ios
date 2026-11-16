@@ -18,7 +18,8 @@ enum HuaweiSessionError: Error, CustomStringConvertible {
 
 // The app's permanent identity towards the watch and the saved pairing keys
 struct WatchStore {
-    private let defaults = UserDefaults.standard
+    var defaults: UserDefaults = .standard
+    var credentials: CredentialStore = .shared
 
     // Same as Gadgetbridge's "androidID": 16 random bytes as upper-case hex
     var deviceId: [UInt8] {
@@ -30,11 +31,11 @@ struct WatchStore {
 
     // Pairing keys are in the Keychain (CredentialStore), moved there from UserDefaults by older builds on first read
     func authToken(for watch: String) -> [UInt8]? {
-        CredentialStore.shared.string(CredentialStore.authTokenKey(watch)).flatMap { [UInt8](hex: $0) }
+        credentials.string(CredentialStore.authTokenKey(watch)).flatMap { [UInt8](hex: $0) }
     }
 
     func setAuthToken(_ token: [UInt8]?, for watch: String) {
-        CredentialStore.shared.set(token?.hexCompact, for: CredentialStore.authTokenKey(watch))
+        credentials.set(token?.hexCompact, for: CredentialStore.authTokenKey(watch))
     }
 }
 
@@ -54,6 +55,7 @@ final class HuaweiSession {
     private var sessionKey: [UInt8]?
     private var liteCounter: UInt32?
     private(set) var isLitePairing = false
+    private(set) var liteAuthenticationFailedWithSavedPIN = false
     private var waiters: [Waiter] = []
     private var notificationId: UInt16 = 0
 
@@ -109,12 +111,17 @@ final class HuaweiSession {
     var onMusicScreenOpened: (() -> Void)?
     var onMusicButton: ((MusicControl.Button?, Int?) -> Void)?
 
-    private let store = WatchStore()
+    private let store: WatchStore
+    private let requestTimeout: (String, Double) -> Double
     private let writeFrame: ([UInt8]) -> Void
     private let maxWriteLength: () -> Int
     private let log: (LogKind, String) -> Void
 
-    init(writeFrame: @escaping ([UInt8]) -> Void, maxWriteLength: @escaping () -> Int, log: @escaping (LogKind, String) -> Void) {
+    init(writeFrame: @escaping ([UInt8]) -> Void, maxWriteLength: @escaping () -> Int,
+         log: @escaping (LogKind, String) -> Void, store: WatchStore = WatchStore(),
+         requestTimeout: @escaping (String, Double) -> Double = { _, seconds in seconds }) {
+        self.store = store
+        self.requestTimeout = requestTimeout
         self.writeFrame = writeFrame
         self.maxWriteLength = maxWriteLength
         self.log = log
@@ -141,8 +148,8 @@ final class HuaweiSession {
 
     func forget(watch: String) {
         store.setAuthToken(nil, for: watch)
-        CredentialStore.shared.set(nil, for: "lite.pin." + watch)
-        CredentialStore.shared.set(nil, for: "lite.secret." + watch)
+        store.credentials.set(nil, for: "lite.pin." + watch)
+        store.credentials.set(nil, for: "lite.secret." + watch)
         isPaired = false
         sessionKey = nil
     }
@@ -281,6 +288,7 @@ final class HuaweiSession {
 
     func request(_ serviceId: UInt8, _ commandId: UInt8, _ tlv: HuaweiTLV, label: String,
                  encrypted: Bool = true, sliced: Bool = false, timeout: Double = 10, quiet: Bool = false) async throws -> HuaweiPacket {
+        try Task.checkCancellation()
         let frames = try frames(serviceId, commandId, tlv, encrypted: encrypted, sliced: sliced)
         lastRequest = String(format: "0x%02X/0x%02X ", serviceId, commandId) + label
         if tracing { log(.info, UploadTrace.line("out", service: serviceId, command: commandId, tlv: tlv, bodySize: 0) + " (\(label))") }
@@ -291,16 +299,27 @@ final class HuaweiSession {
             log(.sent, "\(label)\(encryptedNote): \(size) \(L("bytes", "bayt"))\(partsNote)")
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let id = UUID()
+        let id = UUID()
+        let deadline = requestTimeout(label, timeout)
+        let response: HuaweiPacket = try await withTaskCancellationHandler {
+          try Task.checkCancellation()
+          return try await withCheckedThrowingContinuation { continuation in
             waiters.append(Waiter(id: id, serviceId: serviceId, commandId: commandId, continuation: continuation))
             frames.forEach(writeFrame)
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(timeout))
+                try? await Task.sleep(for: .seconds(deadline))
                 guard let self, let i = self.waiters.firstIndex(where: { $0.id == id }) else { return }
                 self.waiters.remove(at: i).continuation.resume(throwing: HuaweiSessionError.timeout(label))
             }
+          }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard let self, let i = self.waiters.firstIndex(where: { $0.id == id }) else { return }
+                self.waiters.remove(at: i).continuation.resume(throwing: CancellationError())
+            }
         }
+        try Task.checkCancellation()
+        return response
     }
 
     private func frames(_ serviceId: UInt8, _ commandId: UInt8, _ tlv: HuaweiTLV, encrypted: Bool, sliced: Bool) throws -> [[UInt8]] {
@@ -332,8 +351,10 @@ final class HuaweiSession {
     // MARK: - Pairing
 
     // HuaweiSupportProvider: LinkParams -> SecurityNegotiation -> (PinCode + HiChain op 1) -> HiChain op 2
-    func pair(watch: String) async throws {
+    func pair(watch: String, refreshLitePIN: Bool = false) async throws {
+        try Task.checkCancellation()
         isPaired = false
+        liteAuthenticationFailedWithSavedPIN = false
         sessionKey = nil
         liteCounter = nil
         isLitePairing = false
@@ -371,7 +392,7 @@ final class HuaweiSession {
         log(.info, String(format: L("Pairing type requested by the watch: 0x%X", "Saatin istediği eşleşme türü: 0x%X"), authType))
         if HiChainLite.supports(link, authType: authType) {
             isLitePairing = true
-            try await pairLite(watch: watch, link: link)
+            try await pairLite(watch: watch, link: link, refreshPIN: refreshLitePIN)
             return
         }
         guard SecurityNegotiation.isHiChain(authType) else {
@@ -412,15 +433,19 @@ final class HuaweiSession {
 
     private func liteCredential(_ kind: String, watch: String) -> [UInt8]? {
         // Unlike the legacy store, new Lite credentials must never fall back to UserDefaults.
-        CredentialStore.shared.secure.read("lite.\(kind)." + watch).flatMap { [UInt8](hex: $0) }
+        store.credentials.secure.read("lite.\(kind)." + watch).flatMap { [UInt8](hex: $0) }
     }
 
-    private func pairLite(watch: String, link: LinkInfo) async throws {
+    private func pairLite(watch: String, link: LinkInfo, refreshPIN: Bool) async throws {
         guard link.serverNonce.count == 16 else {
             throw HuaweiAuthError.unexpected("HiChain Lite: missing 16-byte server nonce")
         }
         log(.info, "EXPERIMENTAL HiChain Lite Auth-1/CBC. Bonding may interrupt Huawei Health; no account setup will be sent.")
-        var pin = liteCredential("pin", watch: watch)
+        // A Health session can change the PIN. Refresh only on the user's explicit
+        // recovery request, without deleting the previous PIN/key on failure.
+        var pin = refreshPIN ? nil : liteCredential("pin", watch: watch)
+        let usingSavedPIN = pin != nil
+        log(.info, usingSavedPIN ? "Lite authentication: using saved PIN" : "Lite authentication: requesting a fresh PIN")
         if pin == nil {
             let response = try await request(0x01, HiChainLite.pinCommand, HuaweiTLV().with(0x01),
                 label: "Lite 1/4: request PIN; confirm on watch if asked", encrypted: false, timeout: 60)
@@ -431,12 +456,19 @@ final class HuaweiSession {
         guard let pin, !pin.isEmpty else { throw HuaweiAuthError.unexpected("HiChain Lite: empty PIN") }
         let auth = try HiChainLite.authentication(pin: pin, serverNonce: link.serverNonce,
             clientNonce: HCrypto.random(16), authAlgo: link.authAlgo)
-        let response = try await request(0x01, HiChainLite.authCommand, auth.request,
-            label: "Lite 2/4: authenticate", encrypted: false, timeout: 60)
-        guard let actual = response.tlv?.value(0x01), HiChainLite.validates(actual, expected: auth.expectedResponse) else {
-            throw HuaweiAuthError.tokenMismatch("HiChain Lite: authentication response mismatch; no bonding key sent")
+        onPairingStage?(.liteAuthenticating)
+        do {
+            let response = try await request(0x01, HiChainLite.authCommand, auth.request,
+                label: "Lite 2/4: authenticate", encrypted: false, timeout: 60)
+            guard let actual = response.tlv?.value(0x01), HiChainLite.validates(actual, expected: auth.expectedResponse) else {
+                throw HuaweiAuthError.tokenMismatch("HiChain Lite: authentication response mismatch; no bonding key sent")
+            }
+        } catch {
+            if !Task.isCancelled { liteAuthenticationFailedWithSavedPIN = usingSavedPIN }
+            throw error
         }
 
+        onPairingStage?(.liteBonding)
         let identity = HiChainLite.identity(seed: store.deviceId)
         let params = try await request(0x01, HiChainLite.bondParamsCommand,
             HiChainLite.bondParameters(serial: identity.serial, mac: identity.mac),
@@ -451,7 +483,7 @@ final class HuaweiSession {
         let secret = liteCredential("secret", watch: watch) ?? HCrypto.random(16)
         guard secret.count == 16 else { throw HuaweiAuthError.unexpected("HiChain Lite: invalid saved key") }
         // Persist before sending: a lost ACK must not lose a key the watch may have accepted.
-        let backend = CredentialStore.shared.secure
+        let backend = store.credentials.secure
         guard backend.write(pin.hexCompact, for: "lite.pin." + watch),
               backend.write(secret.hexCompact, for: "lite.secret." + watch) else {
             throw HuaweiAuthError.crypto("HiChain Lite: Keychain write failed; no bonding key sent")

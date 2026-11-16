@@ -34,6 +34,7 @@ struct ContentView: View {
                 .tabItem { Label("Lịch sử",systemImage: "clock.arrow.circlepath") }.tag(Tab.history)
             page("Đồng hồ") {
                 statusSection
+                connectionRecoverySection
                 if link.connectedName == nil && !link.isConnecting {
                     devicesSection
                 } else {
@@ -128,6 +129,28 @@ struct ContentView: View {
     }
 
     // MARK: - Sections
+
+    @ViewBuilder
+    private var connectionRecoverySection: some View {
+        if let issue = link.connectionIssue {
+            Section {
+                Label(issue, systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+                if link.canRefreshLitePIN {
+                    Text("PIN đã lưu có thể không còn khớp sau khi dùng Huawei Health. Thử lấy PIN mới; xác nhận trên đồng hồ nếu được hỏi.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Button("Lấy PIN mới và kết nối") { link.retryConnection(refreshPIN: true) }
+                        .disabled(!link.canRetryConnection)
+                }
+                Button("Kết nối lại") { link.retryConnection(refreshPIN: false) }
+                    .disabled(!link.canRetryConnection)
+            } header: {
+                Text("Khôi phục kết nối")
+            } footer: {
+                Text("Đóng hẳn Huawei Health và các bản HuaSideload khác trước khi thử. Không cần xóa ghép nối hoặc reset đồng hồ. Nếu vừa mở lại app, chọn đồng hồ trong Find watch trước.")
+            }
+        }
+    }
 
     private var statusSection: some View {
         Section {
@@ -238,8 +261,7 @@ struct ContentView: View {
                 Text(L("To go back to Huawei Health: tap Disconnect, then open Huawei Health. Disconnecting keeps the watch's data, its Huawei Health pairing and HuaSideload's saved key; it is not Forget pairing and not a reset.",
                        "Huawei Health'e dönmek için: Bağlantıyı kes'e dokun, sonra Huawei Health'i aç. Bağlantıyı kesmek saatin verilerini, Huawei Health eşleşmesini ve HuaSideload'un kayıtlı anahtarını korur; eşleşmeyi unutmak ya da sıfırlamak değildir."))
             } else if !link.isPaired && !link.hasSavedPairing && !filmMode {
-                Text(L("Close Huawei Health before pairing (swipe it up in the app switcher). The watch may ask for confirmation the first time. A watch set up with Huawei Health may still be tied to that Huawei account: if it reports \"Pairing failed\", turn on \"Send setup after pairing\", enter the account ID (the userId cookie on cloud.huawei.com, see Gadgetbridge's Huawei pairing guide) and pair again.",
-                       "Eşleşmeden önce Huawei Health'i kapat (uygulama değiştiriciden yukarı kaydır). İlk eşleşmede saatin ekranında onay çıkabilir. Huawei Health ile kurulan saat o Huawei hesabına bağlı kalabilir: saat \"Eşleşme başarısız\" derse \"Eşleşmeden sonra kurulum gönder\"i aç, hesap ID'sini gir (cloud.huawei.com'daki userId çerezi, Gadgetbridge'in Huawei eşleşme rehberine bak) ve tekrar eşleş."))
+                Text("Đóng hẳn Huawei Health trước khi kết nối. Đồng hồ có thể yêu cầu xác nhận. Với GT 2 Pro, giữ Send setup after pairing tắt; không reset đồng hồ để xử lý lỗi kết nối.")
             }
         }
     }

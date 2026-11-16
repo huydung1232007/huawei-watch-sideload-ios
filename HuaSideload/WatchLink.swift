@@ -38,6 +38,8 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var watchAppProgress: Double?
     @Published private(set) var installedApps: [WatchApps.Installed] = []
     @Published private(set) var watchUDID: String?
+    @Published private(set) var connectionIssue: String?
+    @Published private(set) var canRefreshLitePIN = false
     @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
     @Published private(set) var navigationDeliveryInfo = "Chưa có thời gian xác nhận chỉ dẫn."
     private var navigationPeer: PineNavigationWire.PeerIdentity?
@@ -74,6 +76,13 @@ final class WatchLink: NSObject, ObservableObject {
     private var peripheral: CBPeripheral?
     private var writeCharacteristic: CBCharacteristic?
     private var servicesAwaitingCharacteristics = 0
+    private var writeQueue = BluetoothWriteQueue()
+    private var commandState = WatchCommandState()
+    private var commandTask: Task<Void, Never>?
+    private var connectionID = UUID()
+    private var pendingDevice: FoundDevice?
+    private var retryDevice: FoundDevice?
+    private var refreshLitePINOnConnect = false
     private let parser = HuaweiPacketParser()
     private var session: HuaweiSession!
     let features: [WatchFeature]
@@ -283,9 +292,28 @@ final class WatchLink: NSObject, ObservableObject {
 
     func connect(_ device: FoundDevice) {
         stopScan()
-        if let peripheral { central.cancelPeripheralConnection(peripheral) }
-        resetConnectionState()
+        if let previous = retryDevice, previous.id != device.id {
+            refreshLitePINOnConnect = false
+            canRefreshLitePIN = false
+        }
+        retryDevice = device
+        connectionIssue = nil
+        // Wait for the old disconnect callback before starting a new connection.
+        // Otherwise that callback can reset a handshake already using the same CBPeripheral.
+        if let current = peripheral, current.state != .disconnected {
+            pendingDevice = device
+            wantsConnection = false
+            resetConnectionState()
+            central.cancelPeripheralConnection(current)
+            return
+        }
+        beginConnection(device)
+    }
 
+    private func beginConnection(_ device: FoundDevice) {
+        resetConnectionState()
+        pendingDevice = nil
+        retryDevice = device
         peripheral = device.peripheral
         device.peripheral.delegate = self
         isConnecting = true
@@ -293,11 +321,15 @@ final class WatchLink: NSObject, ObservableObject {
         UserDefaults.standard.set(device.id.uuidString, forKey: Self.lastWatchKey)
         append(.info, L("Connecting to \(device.name)…", "\(device.name) cihazına bağlanılıyor…"))
         central.connect(device.peripheral)
-
+        let attempt = connectionID
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))
-            guard let self, self.isConnecting, self.peripheral === device.peripheral else { return }
+            guard let self, self.connectionID == attempt, self.isConnecting,
+                  self.peripheral === device.peripheral else { return }
             self.wantsConnection = false
+            UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
+            self.resetConnectionState()
+            self.connectionIssue = "Không kết nối được trong 15 giây. Để đồng hồ gần iPhone và đóng Huawei Health rồi thử lại."
             self.central.cancelPeripheralConnection(device.peripheral)
             self.isConnecting = false
             self.append(.error, L("Could not connect within 15 s. Is the watch nearby and awake?", "15 saniyede bağlanamadı. Saat yakında ve açık mı?"))
@@ -309,21 +341,31 @@ final class WatchLink: NSObject, ObservableObject {
     // nothing is sent to the watch, so its pairing with Huawei Health is not touched.
     func disconnect() {
         wantsConnection = false
+        pendingDevice = nil
+        refreshLitePINOnConnect = false
+        connectionIssue = nil
         stopScan()
         // Disconnecting by hand means "start clean": don't reconnect on the next launch until a watch is picked again
         UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
-        guard let peripheral else { return }
+        let current = peripheral
+        resetConnectionState()
+        isConnecting = false
+        guard let peripheral = current else { return }
         for service in peripheral.services ?? [] where service.uuid == huaweiService {
             for c in service.characteristics ?? [] where c.uuid == notifyUUID && c.isNotifying {
                 peripheral.setNotifyValue(false, for: c)
             }
         }
         central.cancelPeripheralConnection(peripheral)
-        if isConnecting {
-            isConnecting = false
-            self.peripheral = nil
-            append(.info, L("Connecting cancelled", "Bağlanma iptal edildi"))
-        }
+    }
+
+    var canRetryConnection: Bool { retryDevice != nil && !isConnecting && busy == nil && !isPaired }
+
+    // Explicit recovery: never deletes credentials, resets the watch, or loops bonding.
+    func retryConnection(refreshPIN: Bool) {
+        guard canRetryConnection, let device = retryDevice else { return }
+        refreshLitePINOnConnect = refreshPIN
+        connect(device)
     }
 
     // On launch, connect to the last used watch automatically
@@ -345,6 +387,8 @@ final class WatchLink: NSObject, ObservableObject {
               let known = central.retrievePeripherals(withIdentifiers: [id]).first else { return }
         peripheral = known
         known.delegate = self
+        retryDevice = FoundDevice(id: known.identifier, peripheral: known, name: known.name ?? "GT 2 Pro",
+                                  systemConnected: known.state == .connected, looksHuawei: true)
         wantsConnection = true
         isConnecting = true
         append(.info, L("Reconnecting to the last watch: ", "Son saate otomatik bağlanılıyor: ") + (known.name ?? "watch"))
@@ -353,6 +397,12 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func resetConnectionState() {
+        connectionID = UUID()
+        isConnecting = false
+        commandState.reset()
+        commandTask?.cancel(); commandTask = nil
+        busy = nil
+        writeQueue.reset()
         routeNavigator.deliveryFailed("Mất kết nối Bluetooth. Kết nối lại và bắt đầu tuyến từ vị trí hiện tại.")
         routeDeliveryGeneration &+= 1
         routeDelivery?.cancel(); routeDelivery = nil
@@ -484,15 +534,34 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     func pair() {
-        guard let watchKey else { return }
+        guard !isPaired, huaweiChannelReady, peripheral?.state == .connected, let watchKey else { return }
+        let attempt = connectionID
+        let refreshPIN = refreshLitePINOnConnect
         run(L("Pairing…", "Eşleşiyor…")) { session in
             do {
-                try await session.pair(watch: watchKey)
+                try await session.pair(watch: watchKey, refreshLitePIN: refreshPIN)
             } catch {
-                self.pairingStage = .failed(String(String(describing: error).prefix(120)))
-                throw error
+                guard self.connectionID == attempt, !Task.isCancelled else { return }
+                let why = String(describing: error)
+                self.canRefreshLitePIN = session.liteAuthenticationFailedWithSavedPIN
+                self.append(.error, why)
+                // Release the failing session. Retrying on its half-written/half-
+                // authenticated channel used to leave the next attempt stuck.
+                self.wantsConnection = false
+                UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
+                let current = self.peripheral
+                self.resetConnectionState()
+                self.pairingStage = .failed(String(why.prefix(120)))
+                self.connectionIssue = why
+                if let current { self.central.cancelPeripheralConnection(current) }
+                return
             }
+            try Task.checkCancellation()
+            guard self.connectionID == attempt else { return }
             self.isPaired = true
+            self.connectionIssue = nil
+            self.canRefreshLitePIN = false
+            self.refreshLitePINOnConnect = false
 
             // Off by default: on a GT 3 SE set up with Huawei Health, the account message made the watch ask for a
             // factory reset ("phone and watch accounts don't match"). Newer watches (Watch Fit 4 Pro) need it.
@@ -500,6 +569,8 @@ final class WatchLink: NSObject, ObservableObject {
                 // Like Gadgetbridge: the watch waits for these after HiChain (PairingSetup)
                 self.pairingStage = .finishingSetup
                 let setup = await session.completeSetup(watchName: self.connectedName ?? "", accountId: Self.huaweiAccountId)
+                try Task.checkCancellation()
+                guard self.connectionID == attempt else { return }
                 if !setup.sent.isEmpty { self.append(.success, L("Setup sent: ", "Kurulum gönderildi: ") + setup.sent.joined(separator: ", ")) }
                 if !setup.skipped.isEmpty { self.append(.info, L("Not asked for by the watch: ", "Saatin istemediği: ") + setup.skipped.joined(separator: ", ")) }
                 if setup.failed.isEmpty {
@@ -982,15 +1053,19 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func run(_ label: String, _ work: @escaping (HuaweiSession) async throws -> Void) {
-        guard !commandsLocked else { return }
+        guard !commandsLocked, let ticket = commandState.begin() else { return }
         busy = label
-        Task {
+        commandTask = Task {
             do {
+                try Task.checkCancellation()
                 try await work(session)
             } catch {
+                guard commandState.accepts(ticket), !Task.isCancelled else { return }
                 append(.error, "\(error)")
             }
+            guard commandState.finish(ticket) else { return }
             busy = nil
+            commandTask = nil
         }
     }
 
@@ -1005,20 +1080,39 @@ final class WatchLink: NSObject, ObservableObject {
         characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
     }
 
-    // One frame; split raw if it is larger than the BLE write limit
+    // Queue entire frames atomically. Respect ATT responses/backpressure rather
+    // than flooding several raw fragments into CoreBluetooth in one loop.
     private func write(_ frame: [UInt8]) {
-        guard let peripheral, let characteristic = writeCharacteristic else {
+        guard let peripheral, peripheral.state == .connected, let characteristic = writeCharacteristic else {
             append(.error, L("The Huawei channel is not ready", "Huawei kanalı hazır değil"))
             return
         }
-        let type = writeType(characteristic)
-        let maxChunk = peripheral.maximumWriteValueLength(for: type)
-        var offset = 0
-        while offset < frame.count {
-            let end = min(offset + maxChunk, frame.count)
-            peripheral.writeValue(Data(frame[offset..<end]), for: characteristic, type: type)
-            offset = end
+        guard writeQueue.enqueue(frame, limit: peripheral.maximumWriteValueLength(for: writeType(characteristic))) else {
+            transportFailed("Bluetooth không cung cấp kích thước gói ghi hợp lệ.")
+            return
         }
+        drainWrites()
+    }
+
+    private func drainWrites() {
+        guard let peripheral, peripheral.state == .connected, let characteristic = writeCharacteristic else { return }
+        let type = writeType(characteristic)
+        while let chunk = writeQueue.next(withResponse: type == .withResponse,
+                                          canSendWithoutResponse: peripheral.canSendWriteWithoutResponse) {
+            peripheral.writeValue(Data(chunk), for: characteristic, type: type)
+            if type == .withResponse { return }
+        }
+    }
+
+    private func transportFailed(_ why: String) {
+        wantsConnection = false
+        UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
+        let current = peripheral
+        resetConnectionState()
+        pairingStage = .failed(String(why.prefix(120)))
+        connectionIssue = why
+        append(.error, why)
+        if let current { central.cancelPeripheralConnection(current) }
     }
 
     private func handle(_ packet: HuaweiPacket) {
@@ -1132,6 +1226,8 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         guard let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first else { return }
         peripheral = restored
+        retryDevice = FoundDevice(id: restored.identifier, peripheral: restored, name: restored.name ?? "Đồng hồ",
+                                  systemConnected: restored.state == .connected, looksHuawei: true)
         restored.delegate = self
         wantsConnection = true
         append(.info, L("iOS relaunched the app in the background for the watch", "iOS uygulamayı saat için arka planda yeniden açtı"))
@@ -1146,6 +1242,10 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        guard peripheral === self.peripheral, wantsConnection, pendingDevice == nil else {
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
         isConnecting = false
         let name = peripheral.name ?? L("Unnamed device", "İsimsiz cihaz")
         connectedName = name
@@ -1154,27 +1254,48 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        isConnecting = false
+        guard peripheral === self.peripheral else { return }
+        resetConnectionState()
+        self.peripheral = nil
+        if let next = pendingDevice {
+            pendingDevice = nil
+            beginConnection(next)
+            return
+        }
+        wantsConnection = false
+        UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
+        connectionIssue = error?.localizedDescription ?? "Không kết nối được Bluetooth. Đóng Huawei Health rồi thử lại."
         append(.error, L("Could not connect: ", "Bağlanamadı: ") + (error?.localizedDescription ?? L("unknown error", "bilinmeyen hata")))
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        isConnecting = false
+        guard peripheral === self.peripheral else { return }
+        let reconnect = wantsConnection && isPaired
         let wasPairing = ![PairingStage.none, .channelReady].contains(pairingStage)
         resetConnectionState()
-        if wasPairing { pairingStage = .connectionLost }
+        self.peripheral = nil
+        if let next = pendingDevice {
+            pendingDevice = nil
+            beginConnection(next)
+            return
+        }
+        if let issue = connectionIssue { pairingStage = .failed(String(issue.prefix(120))) }
+        else if wasPairing { pairingStage = .connectionLost }
         if let error {
             append(.error, L("Connection lost: ", "Bağlantı koptu: ") + error.localizedDescription)
         } else {
             append(.info, L("Disconnected", "Bağlantı kesildi"))
         }
-        if wantsConnection {
+        if reconnect {
             append(.info, L("Trying to reconnect…", "Yeniden bağlanmaya çalışılıyor…"))
-            self.peripheral = peripheral
-            isConnecting = true
-            central.connect(peripheral)
+            beginConnection(FoundDevice(id: peripheral.identifier, peripheral: peripheral,
+                                       name: peripheral.name ?? "Đồng hồ", systemConnected: false, looksHuawei: true))
         } else {
-            self.peripheral = nil
+            if wantsConnection {
+                connectionIssue = "Mất kết nối trong lúc xác thực. Đóng Huawei Health và bấm Kết nối lại."
+            }
+            wantsConnection = false
+            UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
         }
     }
 }
@@ -1183,8 +1304,9 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
 
 extension WatchLink: @preconcurrency CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard peripheral === self.peripheral, wantsConnection, pendingDevice == nil else { return }
         if let error {
-            append(.error, L("Could not read services: ", "Servisler alınamadı: ") + error.localizedDescription)
+            transportFailed("Không đọc được dịch vụ Bluetooth: " + error.localizedDescription)
             return
         }
         let services = peripheral.services ?? []
@@ -1196,6 +1318,7 @@ extension WatchLink: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard peripheral === self.peripheral, wantsConnection, pendingDevice == nil else { return }
         servicesAwaitingCharacteristics -= 1
         if let error {
             append(.error, L("Could not read characteristics of \(service.uuid.uuidString): ", "\(service.uuid.uuidString) karakteristikleri alınamadı: ") + error.localizedDescription)
@@ -1206,8 +1329,13 @@ extension WatchLink: @preconcurrency CBPeripheralDelegate {
             if c.uuid == writeUUID {
                 writeCharacteristic = c
             } else if c.uuid == notifyUUID {
-                peripheral.setNotifyValue(true, for: c)
+                if !c.isNotifying { peripheral.setNotifyValue(true, for: c) }
             }
+        }
+
+        if service.uuid == huaweiService,
+           let notify = service.characteristics?.first(where: { $0.uuid == notifyUUID }), notify.isNotifying {
+            huaweiChannelBecameReady(peripheral, notify: notify)
         }
 
         if servicesAwaitingCharacteristics == 0 && !(peripheral.services ?? []).contains(where: { $0.uuid == huaweiService }) {
@@ -1216,16 +1344,23 @@ extension WatchLink: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        guard characteristic.uuid == notifyUUID else { return }
+        guard peripheral === self.peripheral, wantsConnection, pendingDevice == nil,
+              characteristic.uuid == notifyUUID else { return }
         if let error {
-            append(.error, L("Could not open the notify channel: ", "Bildirim kanalı açılamadı: ") + error.localizedDescription)
+            transportFailed("Không mở được kênh nhận Bluetooth: " + error.localizedDescription)
             return
         }
-        huaweiChannelReady = characteristic.isNotifying && writeCharacteristic != nil
+        huaweiChannelBecameReady(peripheral, notify: characteristic)
+    }
+
+    private func huaweiChannelBecameReady(_ peripheral: CBPeripheral, notify: CBCharacteristic) {
+        guard peripheral === self.peripheral, !huaweiChannelReady,
+              notify.isNotifying, writeCharacteristic != nil else { return }
+        huaweiChannelReady = true
         if huaweiChannelReady {
             pairingStage = .channelReady
             append(.success, L("Huawei channel ready. BLE write limit: \(maxWriteLength) bytes", "Huawei kanalı hazır. BLE yazma sınırı: \(maxWriteLength) bayt"))
-            if hasSavedPairing {
+            if hasSavedPairing || refreshLitePINOnConnect {
                 append(.info, L("Saved pairing found, pairing automatically…", "Kayıtlı eşleşme var, otomatik eşleşiliyor…"))
                 pair()
             } else {
@@ -1235,12 +1370,21 @@ extension WatchLink: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard peripheral === self.peripheral, characteristic === writeCharacteristic else { return }
         if let error {
-            append(.error, L("Write error: ", "Yazma hatası: ") + error.localizedDescription)
+            transportFailed("Lỗi ghi Bluetooth: " + error.localizedDescription)
+            return
         }
+        if writeQueue.acknowledge() { drainWrites() }
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        guard peripheral === self.peripheral else { return }
+        drainWrites()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard peripheral === self.peripheral, wantsConnection, pendingDevice == nil else { return }
         if let error {
             append(.error, L("Read error: ", "Okuma hatası: ") + error.localizedDescription)
             return
