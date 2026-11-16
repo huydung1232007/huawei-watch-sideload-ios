@@ -35,7 +35,6 @@ struct ContentView: View {
             page("Đồng hồ") {
                 statusSection
                 connectionRecoverySection
-                if !filmMode { identityDiagnosticsSection }
                 if link.connectedName == nil && !link.isConnecting {
                     devicesSection
                 } else {
@@ -73,7 +72,7 @@ struct ContentView: View {
             .tabItem { Label("Tiện ích",systemImage: "square.grid.2x2") }.tag(Tab.extras)
         }
         .tint(.blue)
-        // While filming, identities (UDID, serial number, MAC) always stay masked, in the log too
+        // While filming, serial numbers and MAC addresses stay masked, in the log too.
          .onAppear {
             if filmMode { link.revealIdentity = false }
             #if DEBUG && targetEnvironment(simulator)
@@ -171,18 +170,6 @@ struct ContentView: View {
             if !filmMode {
                 ForEach(link.watchInfo, id: \.self) { Text(link.display($0)).font(.callout) }
             }
-            // In filming mode only once paired (an identity left over from the last session must not show before pairing)
-            if let udid = link.watchUDID, link.isPaired || !filmMode {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L("UDID (for the debug profile)", "UDID (geliştirici profili için)")).font(.caption).foregroundStyle(.secondary)
-                    Text(link.revealIdentity ? udid : String(repeating: "•", count: 16))
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                }
-                if !filmMode {
-                    Button(L("Copy UDID", "UDID'yi kopyala")) { UIPasteboard.general.string = udid }
-                }
-            }
         } header: {
             HStack {
                 Text(L("Status", "Durum"))
@@ -197,30 +184,9 @@ struct ContentView: View {
             .textCase(nil)
         } footer: {
             if !filmMode {
-                Text(L("UDID, serial number and MAC addresses are hidden on screen and in the log (e.g. while filming). \"Show identity\" reveals them.",
-                       "UDID, seri no ve MAC adresleri ekranda ve kayıtlarda gizli tutulur (video çekerken görünmesin diye). \"Kimliği göster\" ile açılır."))
+                Text(L("Serial numbers and MAC addresses are hidden on screen and in the log. \"Show identity\" reveals them.",
+                       "Seri no ve MAC adresleri ekranda ve kayıtlarda gizli tutulur. \"Kimliği göster\" ile açılır."))
             }
-        }
-    }
-
-    private var identityDiagnosticsSection: some View {
-        Section {
-            Label(link.identityEvidence.identityState.label,
-                  systemImage: link.watchUDID == nil ? "info.circle" : "checkmark.circle")
-                .font(.footnote)
-            Button("Đọc thông tin cài đặt") { link.readIdentityDiagnostics() }
-                .disabled(!link.isPaired || link.commandsLocked)
-            Button("Sao chép báo cáo") {
-                UIPasteboard.general.string = link.identityEvidence.report()
-            }
-            DisclosureGroup("Xem báo cáo") {
-                Text(link.identityEvidence.report()).font(.caption.monospaced())
-                    .textSelection(.enabled)
-            }
-        } header: {
-            Text("UDID & chẩn đoán")
-        } footer: {
-            Text("Báo cáo chỉ gồm mã giao thức, độ dài trường và phiên bản API; không chứa số sê-ri, MAC, PIN, khóa hoặc giá trị UDID. Đọc thông tin không ghép nối lại đồng hồ.")
         }
     }
 
