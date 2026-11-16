@@ -2,6 +2,59 @@ import XCTest
 @testable import HuaSideloadParsing
 
 final class MotorcycleRouteTests: XCTestCase {
+    private func shape(_ coordinates: [(Int,Int)]) -> String {
+        var previous = (0,0), bytes = [UInt8]()
+        func append(_ delta: Int) {
+            var value = delta < 0 ? (-delta*2-1) : delta*2
+            while value >= 32 { bytes.append(UInt8((value & 31) | 32)+63); value >>= 5 }
+            bytes.append(UInt8(value)+63)
+        }
+        for point in coordinates { append(point.0-previous.0); append(point.1-previous.1); previous = point }
+        return String(bytes:bytes,encoding:.utf8)!
+    }
+    private func twoLegs() -> [String:Any] {
+        func leg(_ points: [(Int,Int)]) -> [String:Any] {
+            ["shape":shape(points),"summary":["has_highway":false],"maneuvers":[
+                ["travel_type":"motorcycle","begin_shape_index":0,"type":1,"instruction":"Start"],
+                ["travel_type":"motorcycle","begin_shape_index":1,"type":4,"instruction":"Arrive"]]]
+        }
+        return ["trip":["status":0,"units":"kilometers","summary":["time":100.0,"length":2.0,"has_highway":false],
+            "legs":[leg([(10_000_000,106_000_000),(10_001_000,106_000_000)]),
+                    leg([(10_001_000,106_000_000),(10_002_000,106_000_000)])]]]
+    }
+    func testRequestKeepsStopOrderAndUsesBreaksWithoutAlternates() throws {
+        let stops = [MotorcycleRoute.Coordinate(latitude:10.1,longitude:106),.init(latitude:10.2,longitude:106)]
+        let data = try MotorcycleRoute.request(origin:.init(latitude:10,longitude:106),destination:.init(latitude:10.3,longitude:106),stops:stops)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+        let locations = try XCTUnwrap(root["locations"] as? [[String:Any]])
+        XCTAssertEqual(locations.compactMap { $0["lat"] as? Double },[10,10.1,10.2,10.3])
+        XCTAssertTrue(locations.allSatisfy { $0["type"] as? String == "break" })
+        XCTAssertEqual(root["alternates"] as? Int,0)
+        XCTAssertThrowsError(try MotorcycleRoute.request(origin:stops[0],destination:stops[1],stops:Array(repeating:stops[0],count:4)))
+    }
+    func testMultiLegDecodeJoinsGeometryAndOffsetsTurnsAtStopBoundary() throws {
+        let route = try MotorcycleRoute.decode(encode(twoLegs()))
+        XCTAssertEqual(route.coordinates.count,3)
+        XCTAssertEqual(route.stopEndIndexes,[1])
+        XCTAssertEqual(route.steps.map(\.index),[0,1,1,2])
+        XCTAssertEqual(route.steps[1].instruction,"Đến điểm dừng 1")
+        XCTAssertEqual(route.steps.last?.instruction,"Đến điểm đến")
+        XCTAssertEqual(route.distance,2000)
+    }
+    func testInvalidLaterLegRejectsWholeItinerary() throws {
+        for invalid in ["highway","mode","index","gap"] {
+            var root = twoLegs(), trip = root["trip"] as! [String:Any]
+            var legs = trip["legs"] as! [[String:Any]], maneuvers = legs[1]["maneuvers"] as! [[String:Any]]
+            switch invalid {
+            case "highway": legs[1]["summary"] = ["has_highway":true]
+            case "mode": maneuvers[0]["travel_type"] = "car"
+            case "index": maneuvers[1]["begin_shape_index"] = 99
+            default: legs[1]["shape"] = shape([(11_000_000,106_000_000),(11_001_000,106_000_000)])
+            }
+            legs[1]["maneuvers"] = maneuvers; trip["legs"] = legs; root["trip"] = trip
+            XCTAssertThrowsError(try MotorcycleRoute.decode(encode(root)))
+        }
+    }
     private func fixture() throws -> [String: Any] {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "motorcycle-hcmc-public", withExtension: "json"))
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])

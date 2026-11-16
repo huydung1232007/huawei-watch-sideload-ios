@@ -34,6 +34,10 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     @Published var mode: Mode = .motorcycle { didSet { if mode != oldValue { clearPlan() } } }
     @Published private(set) var results: [Destination] = []
     @Published private(set) var destination: Destination?
+    @Published private(set) var stopovers: [Destination] = []
+    @Published private(set) var completedStopCount = 0
+    @Published private(set) var sharedPlace: MapShareEnvelope?
+    var canAddStopover: Bool { destination != nil && stopovers.count < 3 && !isNavigating && !isCalculating }
     @Published private(set) var locationStatus = "Chưa lấy vị trí."
     @Published private(set) var status = "Chọn điểm đến và xem tuyến đường trước khi bắt đầu."
     @Published private(set) var preview = ""
@@ -65,6 +69,13 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         didSet {
             UserDefaults.standard.set(followingManeuverEnabled,forKey:"watchFollowingManeuverV1")
             if !followingManeuverEnabled { followingManeuverPolicy.reset() }
+            if let fix = currentLocation { updateGuidance(fix,force:true) }
+        }
+    }
+    @Published var watchSpeedEnabled = UserDefaults.standard.object(forKey:"watchSpeedVisibleV1") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(watchSpeedEnabled,forKey:"watchSpeedVisibleV1")
+            followingManeuverPolicy.reset()
             if let fix = currentLocation { updateGuidance(fix,force:true) }
         }
     }
@@ -117,6 +128,12 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private var search: MKLocalSearch?
     private var directions: MKDirections?
     private struct Plan { let polyline: MKPolyline; let distance: Double; let expectedTravelTime: Double }
+    private struct StopBoundary {
+        let id: UUID
+        let at: Double
+        let coordinate: CLLocationCoordinate2D
+        var progressBoundary: RouteStopProgress.Boundary { .init(id:id,along:at) }
+    }
     private struct PreparedRoute {
         let id = UUID()
         let plan: Plan
@@ -124,6 +141,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         let maneuvers: [Maneuver]
         let origin: CLLocation
         let name: String
+        var stops: [StopBoundary] = []
     }
     private var preparedRoutes: [PreparedRoute] = []
     private var route: Plan?
@@ -150,6 +168,10 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
     private var rerouteTask: Task<Void,Never>?
     private var rerouteDirections: MKDirections?
     private var calculateWhenLocated = false
+    private var stopoverTask: Task<Void,Never>?
+    private var stopBoundaries: [StopBoundary] = []
+    private var stopProgress = RouteStopProgress()
+    private var remainingStopovers: [Destination] { stopovers.filter { !stopProgress.visited.contains($0.id) } }
 
     override init() {
         super.init()
@@ -268,8 +290,24 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         status = "Đã chọn \(value.name). Bấm Tính tuyến đường."
     }
 
+    func receiveSharedPlace(_ value: MapShareEnvelope) {
+        guard value.id.uuidString != UserDefaults.standard.string(forKey:"lastHandledMapShareV1") else { return }
+        sharedPlace = value
+    }
+
+    func consumedSharedPlace(_ id: UUID) {
+        guard sharedPlace?.id == id else { return }
+        UserDefaults.standard.set(id.uuidString,forKey:"lastHandledMapShareV1")
+        sharedPlace = nil
+    }
+
     func selectAndCalculate(_ value: Destination) {
         select(value)
+        calculateWhenReady()
+    }
+
+    func calculateWhenReady() {
+        guard !isNavigating, destination != nil else { return }
         if let fix = currentLocation, Date().timeIntervalSince(fix.timestamp) < 60, fix.horizontalAccuracy <= 60 {
             calculateRoute()
         } else {
@@ -279,13 +317,36 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
     }
 
+    func addStopover(_ value: Destination) {
+        guard canAddStopover else { return }
+        clearPlan()
+        stopovers.append(value)
+        results = []
+        status = "Đã thêm điểm dừng. Bấm Xong hoặc Tính tuyến đường để cập nhật hành trình."
+    }
+
+    func removeStopover(_ id: UUID) {
+        guard !isNavigating, !isCalculating, stopovers.contains(where: { $0.id == id }) else { return }
+        clearPlan(); stopovers.removeAll { $0.id == id }
+        status = "Đã xóa điểm dừng. Tính lại tuyến để cập nhật."
+    }
+
+    func moveStopover(_ id: UUID, direction: Int) {
+        guard !isNavigating, !isCalculating, let index = stopovers.firstIndex(where: { $0.id == id }),
+              [-1,1].contains(direction), stopovers.indices.contains(index+direction) else { return }
+        clearPlan(); stopovers.swapAt(index,index+direction)
+        status = "Đã đổi thứ tự điểm dừng. Tính lại tuyến để cập nhật."
+    }
+
     func clearPlan() {
         calculateWhenLocated = false
         stop(notifyWatch: true)
         directions?.cancel()
         motorcycleRequestID = UUID(); motorcycleTask?.cancel(); motorcycleTask = nil
+        stopoverTask?.cancel(); stopoverTask = nil
         directions = nil
         isCalculating = false
+        stopProgress.reset(); completedStopCount = 0
         discardRoutes()
     }
 
@@ -293,6 +354,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         clearDirectionObservation()
         followingManeuverPolicy.reset()
         route = nil; path = nil; maneuvers = []
+        stopBoundaries = []
         preparedRoutes = []; routeChoices = []; selectedRouteID = nil
         hasRoute = false; displayPolyline = nil; instructionPreview = []; routeOrigin = nil
         preview = ""; instruction = ""; distanceToTurn = ""; followUpInstruction = ""; remainingTripSummary = ""
@@ -324,6 +386,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         followingManeuverPolicy.reset()
         selectedRouteID = candidate.id
         route = candidate.plan; path = candidate.path; maneuvers = candidate.maneuvers
+        stopBoundaries = candidate.stops
         routeOrigin = candidate.origin
         displayPolyline = candidate.plan.polyline; routeRevision = UUID()
         instructionPreview = candidate.maneuvers.map(\.instruction)
@@ -343,9 +406,15 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
         directions?.cancel()
         motorcycleRequestID = UUID(); motorcycleTask?.cancel(); motorcycleTask = nil
+        stopoverTask?.cancel(); stopoverTask = nil
+        stopProgress.reset(); completedStopCount = 0
         discardRoutes()
         if mode == .motorcycle {
             calculateMotorcycleRoute(from: location, to: destination)
+            return
+        }
+        if !stopovers.isEmpty {
+            calculateAppleStopovers(from:location,to:destination,stops:stopovers)
             return
         }
         let request = MKDirections.Request()
@@ -379,7 +448,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         var errorDescription: String? { "Không có tuyến đường phù hợp được trả về tại khu vực này." }
     }
 
-    private func prepare(_ route: MKRoute, origin: CLLocation) throws -> PreparedRoute {
+    private func prepare(_ route: MKRoute, origin: CLLocation, arrivalName: String? = nil) throws -> PreparedRoute {
         let mapPoints = (0..<route.polyline.pointCount).map { route.polyline.points()[$0] }
         guard mapPoints.count >= 2 else { throw RouteError.noRoute }
         let lengths = zip(mapPoints, mapPoints.dropFirst()).map { $0.0.distance(to: $0.1) }
@@ -396,7 +465,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             along += max(0, step.distance)
         }
         if let last = turns.last, last.at >= path.totalLength - 5 { turns.removeLast() }
-        turns.append(Maneuver(at: path.totalLength, instruction: "Đến " + (destination?.name ?? "điểm đến"), turn: .destination))
+        turns.append(Maneuver(at: path.totalLength, instruction: "Đến " + (arrivalName ?? destination?.name ?? "điểm đến"), turn: .destination))
         return PreparedRoute(plan: Plan(polyline: route.polyline, distance: route.distance, expectedTravelTime: route.expectedTravelTime),
                              path: path, maneuvers: turns, origin: origin, name: String(route.name.prefix(140)))
     }
@@ -407,7 +476,8 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             return
         }
         let target = destination.item.placemark.coordinate
-        guard location.distance(from: CLLocation(latitude: target.latitude, longitude: target.longitude)) < 100_000 else {
+        let stops = stopovers
+        guard itineraryWithinDemoLimit(from:location,stops:stops,destination:destination) else {
             status = "Bản thử máy chủ công cộng chỉ hỗ trợ điểm đến cách dưới 100 km."
             return
         }
@@ -423,20 +493,88 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
                 request.setValue("github.com/huydung1232007/huawei-watch-sideload-ios-personal-test", forHTTPHeaderField: "X-Client-Id")
                 request.httpBody = try MotorcycleRoute.request(
                     origin: .init(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude),
-                    destination: .init(latitude: target.latitude, longitude: target.longitude))
+                    destination: .init(latitude: target.latitude, longitude: target.longitude),
+                    stops: stops.map { .init(latitude:$0.item.placemark.coordinate.latitude,longitude:$0.item.placemark.coordinate.longitude) })
                 let client = URLSession(configuration: .ephemeral)
                 defer { client.invalidateAndCancel() }
                 let (data, response) = try await client.data(for: request)
                 guard self.motorcycleRequestID == requestID, !Task.isCancelled else { return }
                 guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw MotorcycleRoute.RouteError.provider("Máy chủ chưa sẵn sàng. Thử lại sau.") }
                 let results = try MotorcycleRoute.decodeOptions(data)
-                let candidates = results.compactMap { self.prepareMotorcycle($0,origin: location) }
+                let candidates = results.compactMap { self.prepareMotorcycle($0,origin: location,stops:stops) }
                 try self.installRoutes(candidates)
             } catch {
                 guard self.motorcycleRequestID == requestID else { return }
                 self.status = "Không tính được tuyến xe máy: \(error.localizedDescription)"
             }
             if self.motorcycleRequestID == requestID { self.isCalculating = false }
+        }
+    }
+
+    private func itineraryWithinDemoLimit(from origin: CLLocation,stops: [Destination],destination: Destination) -> Bool {
+        let coordinates = [origin.coordinate] + (stops+[destination]).map { $0.item.placemark.coordinate }
+        return zip(coordinates,coordinates.dropFirst()).reduce(0.0) { total,pair in
+            total+CLLocation(latitude:pair.0.latitude,longitude:pair.0.longitude)
+                .distance(from:CLLocation(latitude:pair.1.latitude,longitude:pair.1.longitude))
+        } < 100_000
+    }
+
+    private func appleItinerary(from origin: CLLocation,to destination: Destination,stops: [Destination],
+                                transport: Mode,rerouting: Bool) async throws -> PreparedRoute {
+        var legs = [PreparedRoute](), previous = origin
+        for target in stops+[destination] {
+            try Task.checkCancellation()
+            let request = MKDirections.Request()
+            request.source = MKMapItem(placemark:MKPlacemark(coordinate:previous.coordinate))
+            request.destination = target.item; request.transportType = transport.transport
+            request.requestsAlternateRoutes = false
+            let operation = MKDirections(request:request)
+            if rerouting { rerouteDirections = operation } else { directions = operation }
+            let response = try await operation.calculate()
+            try Task.checkCancellation()
+            guard let route = response.routes.first else { throw RouteError.noRoute }
+            legs.append(try prepare(route,origin:previous,arrivalName:target.name))
+            previous = CLLocation(latitude:target.item.placemark.coordinate.latitude,longitude:target.item.placemark.coordinate.longitude)
+        }
+        let geometry = legs.enumerated().map { index,leg -> RouteLegJoiner.Leg in
+            let gap: Double
+            if index == 0 { gap = 0 }
+            else {
+                let a = legs[index-1].path.points.last!,b = leg.path.points.first!
+                gap = MKMapPoint(x:a.x,y:a.y).distance(to:MKMapPoint(x:b.x,y:b.y))
+            }
+            return .init(path:leg.path,gap:gap)
+        }
+        guard let joined = RouteLegJoiner.join(geometry) else { throw RouteError.noRoute }
+        let points = joined.path.points.map { MKMapPoint(x:$0.x,y:$0.y) }
+        let polyline = MKPolyline(points:points,count:points.count)
+        var turns = [Maneuver](), boundaries = [StopBoundary]()
+        for (index,leg) in legs.enumerated() {
+            turns += leg.maneuvers.map { .init(at:joined.starts[index]+$0.at,instruction:$0.instruction,turn:$0.turn) }
+            if index < stops.count {
+                let end = joined.ends[index]
+                boundaries.append(.init(id:stops[index].id,at:joined.path.cumulative[end],coordinate:points[end].coordinate))
+            }
+        }
+        return PreparedRoute(plan:.init(polyline:polyline,distance:legs.reduce(0){$0+$1.plan.distance},
+            expectedTravelTime:legs.reduce(0){$0+$1.plan.expectedTravelTime}),path:joined.path,maneuvers:turns,
+            origin:origin,name:String(legs.map(\.name).filter{ !$0.isEmpty }.joined(separator:" · ").prefix(140)),stops:boundaries)
+    }
+
+    private func calculateAppleStopovers(from origin: CLLocation,to destination: Destination,stops: [Destination]) {
+        let requestID = UUID(); motorcycleRequestID = requestID
+        let transport = mode
+        isCalculating = true; status = "Đang tính tuyến qua \(stops.count) điểm dừng…"
+        stopoverTask = Task {
+            do {
+                let route = try await self.appleItinerary(from:origin,to:destination,stops:stops,transport:transport,rerouting:false)
+                guard self.motorcycleRequestID == requestID, !Task.isCancelled else { return }
+                try self.installRoutes([route])
+            } catch {
+                guard self.motorcycleRequestID == requestID, !Task.isCancelled else { return }
+                self.status = "Chưa tính được đủ các chặng: \(error.localizedDescription)"
+            }
+            if self.motorcycleRequestID == requestID { self.isCalculating = false; self.stopoverTask = nil }
         }
     }
 
@@ -467,6 +605,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
         let sessionID = navigationSession
         let transport = mode
+        let stops = remainingStopovers
         isRerouting = true
         clearDirectionObservation()
         onRouteReset?()
@@ -486,16 +625,19 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
                     request.setValue("application/json",forHTTPHeaderField: "Content-Type")
                     request.setValue("github.com/huydung1232007/huawei-watch-sideload-ios-personal-test",forHTTPHeaderField: "X-Client-Id")
                     let target = destination.item.placemark.coordinate
-                    guard location.distance(from: CLLocation(latitude: target.latitude,longitude: target.longitude)) < 100_000 else { throw RouteError.noRoute }
+                    guard self.itineraryWithinDemoLimit(from:location,stops:stops,destination:destination) else { throw RouteError.noRoute }
                     request.httpBody = try MotorcycleRoute.request(
                         origin: .init(latitude: location.coordinate.latitude,longitude: location.coordinate.longitude),
-                        destination: .init(latitude: target.latitude,longitude: target.longitude),alternatives: false)
+                        destination: .init(latitude: target.latitude,longitude: target.longitude),alternatives: false,
+                        stops: stops.map { .init(latitude:$0.item.placemark.coordinate.latitude,longitude:$0.item.placemark.coordinate.longitude) })
                     let client = URLSession(configuration: .ephemeral)
                     defer { client.invalidateAndCancel() }
                     let (data,response) = try await client.data(for: request)
                     guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw RouteError.noRoute }
                     let results = try MotorcycleRoute.decodeOptions(data)
-                    candidates = results.compactMap { self.prepareMotorcycle($0,origin: location) }
+                    candidates = results.compactMap { self.prepareMotorcycle($0,origin: location,stops:stops) }
+                } else if !stops.isEmpty {
+                    candidates = [try await self.appleItinerary(from:location,to:destination,stops:stops,transport:transport,rerouting:true)]
                 } else {
                     let request = MKDirections.Request()
                     request.source = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
@@ -521,19 +663,31 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
     }
 
-    private func prepareMotorcycle(_ result: MotorcycleRoute, origin: CLLocation) -> PreparedRoute? {
+    private func prepareMotorcycle(_ result: MotorcycleRoute, origin: CLLocation, stops: [Destination] = []) -> PreparedRoute? {
+        guard result.stopEndIndexes.count == stops.count else { return nil }
         let coordinates = result.coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude,longitude: $0.longitude) }
         let polyline = MKPolyline(coordinates: coordinates,count: coordinates.count)
         let points = (0..<polyline.pointCount).map { polyline.points()[$0] }
         let lengths = zip(points,points.dropFirst()).map { $0.0.distance(to: $0.1) }
         guard let path = RouteProgress(points: points.map { .init(x: $0.x,y: $0.y) },lengths: lengths) else { return nil }
-        let turns = result.steps.map { Maneuver(at: path.cumulative[$0.index],instruction: $0.instruction,turn: $0.turn) }
+        let turns = result.steps.map { step -> Maneuver in
+            let name: String
+            if step.turn == .destination, let index = result.stopEndIndexes.firstIndex(of:step.index) { name = "Đến điểm dừng: "+stops[index].name }
+            else { name = step.instruction }
+            return Maneuver(at:path.cumulative[step.index],instruction:name,turn:step.turn)
+        }
+        let boundaries = result.stopEndIndexes.enumerated().map { index,end in
+            StopBoundary(id:stops[index].id,at:path.cumulative[end],coordinate:coordinates[end])
+        }
         return PreparedRoute(plan: Plan(polyline: polyline,distance: result.distance,expectedTravelTime: result.duration),
-            path: path,maneuvers: turns,origin: origin,name: result.via)
+            path: path,maneuvers: turns,origin: origin,name: result.via,stops:boundaries)
     }
 
     func start() {
         guard hasRoute, path != nil, !maneuvers.isEmpty, !isNavigating else { return }
+        guard Set(stopBoundaries.map(\.id)) == Set(stopovers.map(\.id)) else {
+            hasRoute = false; status = "Tính lại tuyến qua các điểm dừng trước khi bắt đầu chuyến mới."; return
+        }
         guard let location = currentLocation, Date().timeIntervalSince(location.timestamp) < 60 else {
             requestLocation()
             status = "Đang lấy vị trí mới. Khi có GPS, bấm Bắt đầu lại."
@@ -549,6 +703,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         maneuverIndex = 0; progress = 0; lastFixTime = nil
         refreshPolicy = GuidanceRefreshPolicy()
         followingManeuverPolicy.reset()
+        stopProgress.reset(); completedStopCount = 0
         clearDirectionObservation()
         tripStartedAt = Date(); navigationSession = UUID()
         alertPolicy = TurnAlertPolicy(); reroutePolicy = ReroutePolicy()
@@ -675,7 +830,8 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         let speed = max(location.speed, mode == .walking ? 2 : 15)
         let window = max(300, elapsed * speed * 2.5 + 50)
         guard let projection = path.project(.init(x: point.x, y: point.y),
-            minimum: max(0, progress - 35), maximum: min(path.totalLength, progress + window), preferred: progress) else { return }
+            minimum: max(0, progress - 35), maximum: stopProgress.projectionMaximum(min(path.totalLength,progress+window),
+                boundaries:stopBoundaries.map(\.progressBoundary)), preferred: progress) else { return }
         let offRoute = projection.crossTrack > (mode == .walking ? 45 : 70)
         if isRerouting {
             clearDirectionObservation()
@@ -694,12 +850,21 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         reroutePolicy.resetObservation()
         progress = projection.along
         lastFixTime = location.timestamp
+        if let boundary = stopBoundaries.first(where: { !stopProgress.visited.contains($0.id) }),
+           stopProgress.arrive(boundaries:stopBoundaries.map(\.progressBoundary),along:progress,
+                distance:location.distance(from:CLLocation(latitude:boundary.coordinate.latitude,longitude:boundary.coordinate.longitude)),
+                accuracy:location.horizontalAccuracy) != nil {
+            completedStopCount = stopProgress.visited.count
+            while maneuverIndex+1 < maneuvers.count, maneuvers[maneuverIndex].at <= boundary.at+0.1 { maneuverIndex += 1 }
+            followingManeuverPolicy.reset()
+        }
         let advance = mode == .walking ? 8.0 : 15.0
         while maneuverIndex + 1 < maneuvers.count, progress > maneuvers[maneuverIndex].at + advance { maneuverIndex += 1 }
         let next = maneuvers[maneuverIndex]
         let remaining = max(0, next.at - progress)
         let totalRemaining = max(0, path.totalLength - progress)
-        if totalRemaining < 25, location.horizontalAccuracy <= 25, let destination,
+        if totalRemaining < 25, location.horizontalAccuracy <= 25,
+           stopProgress.visited.count == stopovers.count, let destination,
            location.distance(from: CLLocation(latitude: destination.item.placemark.coordinate.latitude,
                                               longitude: destination.item.placemark.coordinate.longitude)) < 25 {
             emit(instruction: "Đã đến " + destination.name, distance: "0 m", turn: .destination, force: true)
@@ -734,7 +899,7 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
         }
         let secondsRemaining = route.expectedTravelTime * totalRemaining / path.totalLength
         remainingTripSummary = WatchGuidancePresentation.summary(meters:totalRemaining,seconds:secondsRemaining) ?? Self.distance(totalRemaining)
-        status = "Đang điều hướng · còn \(remainingTripSummary) · ước tính"
+        status = "Đang điều hướng · còn \(remainingTripSummary) · ước tính" + (stopovers.isEmpty ? "" : " · đã ghé \(completedStopCount)/\(stopovers.count)")
         let formatter = DateFormatter(); formatter.dateFormat = "HH:mm"
         let eta = WatchGuidancePresentation.arrivalField(clock:formatter.string(from:Date().addingTimeInterval(secondsRemaining)),
             meters:totalRemaining,seconds:secondsRemaining,expanded:watchTripInfoEnabled,
@@ -744,12 +909,13 @@ final class RouteNavigator: NSObject, ObservableObject, CLLocationManagerDelegat
             next:following?.turn,gap:following.map { $0.at-next.at }) : ""
         let afterFollowing = maneuverIndex+2 < maneuvers.count ? maneuvers[maneuverIndex+2] : nil
         let showFollowing = followingManeuverPolicy.shouldShow(maneuver:maneuverIndex,current:next.turn,
-            remaining:remaining,enabled:followingManeuverEnabled)
+            remaining:remaining,enabled:followingManeuverEnabled,always:!watchSpeedEnabled)
         let straightLength: Double?
         if let following,let afterFollowing { straightLength = afterFollowing.at-following.at }
         else { straightLength = nil }
         let currentSpeed = WatchGuidancePresentation.speedField(metersPerSecond:location.speed,
-            next:following?.turn,gap:following.map { $0.at-next.at },straightLength:straightLength,showFollowing:showFollowing)
+            next:following?.turn,gap:following.map { $0.at-next.at },straightLength:straightLength,
+            showFollowing:showFollowing,showSpeed:watchSpeedEnabled)
         let vibration = turnAlertsEnabled ? alertPolicy.pattern(maneuver: maneuverIndex,turn: next.turn,distance: remaining,
             elapsed: Date().timeIntervalSince(tripStartedAt),eligible: next.at > 20) : nil
         emit(instruction: next.instruction, distance: Self.distance(remaining), turn: next.turn,
@@ -807,6 +973,13 @@ extension RouteNavigator {
         history.prepareVisualPreview()
         favorites.prepareVisualPreview()
         let preview = ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]
+        if preview == "stopovers" {
+            stopovers = [("Bưu điện Trung tâm",10.779783,106.699018),("Hồ Con Rùa",10.7824,106.6956)].map { name,lat,lon in
+                let item = MKMapItem(placemark:MKPlacemark(coordinate:.init(latitude:lat,longitude:lon)))
+                item.name = name; return Destination(item:item)
+            }
+        }
+        if preview == "navigation-settings" { watchSpeedEnabled = false }
         if preview == "guidance" || preview == "direction-warning" {
             instruction = "Rẽ trái vào Nguyễn Trãi"; currentTurn = .left; distanceToTurn = "120 m"
             followUpInstruction = "Sau đó rẽ phải sau 60 m"; remainingTripSummary = "3.2km · 9ph"

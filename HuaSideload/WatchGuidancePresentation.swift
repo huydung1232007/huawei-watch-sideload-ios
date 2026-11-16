@@ -26,7 +26,7 @@ enum WatchGuidancePresentation {
     // to that step; a turn uses the distance after the current turn to that turn.
     // Rendering these arrow glyphs still needs confirmation on Navigation Watch.
     static func speedField(metersPerSecond: Double,next: PineNavigationWire.Turn?,gap: Double?,
-                           straightLength: Double?,showFollowing: Bool) -> String {
+                           straightLength: Double?,showFollowing: Bool,showSpeed: Bool = true) -> String {
         if showFollowing,let next,let gap,gap.isFinite,gap >= 0,(next == .straight || gap > 0),
            let distance = next == .straight ? straightLength : gap,
            distance.isFinite,(1...20_000_000).contains(distance) {
@@ -36,10 +36,12 @@ enum WatchGuidancePresentation {
             case .left: symbol = "←"
             case .right: symbol = "→"
             case .uTurn: symbol = "↶"
+            case .destination: symbol = showSpeed ? "" : "•"
             default: symbol = ""
             }
             if !symbol.isEmpty { return symbol+";"+followingDistance(distance) }
         }
+        guard showSpeed else { return "" }
         guard metersPerSecond.isFinite,metersPerSecond >= 0 else { return "" }
         let kmh = metersPerSecond*3.6
         guard kmh.isFinite else { return "" }
@@ -96,7 +98,11 @@ enum WatchGuidancePresentation {
 struct FollowingManeuverPolicy {
     private var activeManeuver: Int?
     mutating func reset() { activeManeuver = nil }
-    mutating func shouldShow(maneuver: Int,current: PineNavigationWire.Turn,remaining: Double,enabled: Bool) -> Bool {
+    mutating func shouldShow(maneuver: Int,current: PineNavigationWire.Turn,remaining: Double,enabled: Bool,always: Bool = false) -> Bool {
+        if always {
+            reset()
+            return remaining.isFinite && remaining >= 0
+        }
         guard enabled,remaining.isFinite,remaining >= 0,
               current == .left || current == .right || current == .uTurn else {
             reset(); return false

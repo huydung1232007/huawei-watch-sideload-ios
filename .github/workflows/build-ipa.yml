@@ -7,13 +7,13 @@ on:
     branches: [hichain-lite-test]
     paths:
       - 'HuaSideload/**'
+      - 'ShareExtension/**'
       - 'Tests/**'
       - 'WatchApps/**'
       - 'Package.swift'
       - 'project.yml'
       - 'generate.sh'
       - 'Config/**'
-      - 'tools/pc-remote/**'
       - '.github/workflows/build-ipa.yml'
   workflow_dispatch:
     inputs:
@@ -50,9 +50,6 @@ jobs:
           set -o pipefail
           swift test 2>&1 | tee test.log
 
-      - name: Test PC remote protocol and replay protection
-        run: python3 -m unittest discover -s tools/pc-remote -p test_pc_remote.py -v
-
       - name: Generate Xcode project
         env:
           HUASIDELOAD_BUNDLE_ID: ${{ inputs.bundle_id || 'com.example.huasideload.lite' }}
@@ -82,6 +79,10 @@ jobs:
           zip -qry HuaSideload-unsigned.ipa Payload
           shasum -a 256 HuaSideload-unsigned.ipa | tee HuaSideload-unsigned.ipa.sha256
           /usr/libexec/PlistBuddy -c Print "$APP/Info.plist" | tee info-plist.txt
+          EXT="$APP/PlugIns/MapShare.appex"
+          test -d "$EXT"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXT/Info.plist")" = "com.apple.share-services"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$EXT/Info.plist")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -147,6 +148,17 @@ jobs:
           SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW=fresh-pin xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
           sleep 3
           xcrun simctl io "$SIM_ID" screenshot fresh-pin-ui.png
+          xcrun simctl terminate "$SIM_ID" com.example.huasideload.lite
+          for PREVIEW in stopovers navigation-settings; do
+            SIMCTL_CHILD_HUASIDELOAD_UI_PREVIEW="$PREVIEW" xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
+            sleep 3
+            xcrun simctl io "$SIM_ID" screenshot "$PREVIEW-ui.png"
+            xcrun simctl terminate "$SIM_ID" com.example.huasideload.lite
+          done
+          xcrun simctl launch "$SIM_ID" com.example.huasideload.lite -AppleLanguages '(vi)' -AppleLocale vi_VN
+          xcrun simctl openurl "$SIM_ID" 'huasideload://maps?url=https%3A%2F%2Fwww.google.com%2Fmaps%2Fsearch%2F%3Fapi%3D1%26query%3D10.779783%2C106.699018'
+          sleep 6
+          xcrun simctl io "$SIM_ID" screenshot shared-place-ui.png
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -164,6 +176,9 @@ jobs:
             place-link-ui.png
             place-link-preview-ui.png
             fresh-pin-ui.png
+            stopovers-ui.png
+            navigation-settings-ui.png
+            shared-place-ui.png
             ui-build.log
 
       - uses: actions/upload-artifact@v4

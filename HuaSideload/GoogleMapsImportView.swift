@@ -14,6 +14,14 @@ struct GoogleMapsImportView: View {
     @State private var requestID = UUID()
     @State private var operation: Task<Void,Never>?
     @State private var search: MKLocalSearch?
+    private let automaticallyResolve: Bool
+    @State private var resolvedInitialInput = false
+
+    init(navigator: RouteNavigator,favorites: FavoritePlacesStore,initialInput: String? = nil,automaticallyResolve: Bool = false) {
+        self.navigator = navigator; self.favorites = favorites
+        self.automaticallyResolve = automaticallyResolve
+        _input = State(initialValue:initialInput ?? "")
+    }
 
     var body: some View {
         Group {
@@ -22,6 +30,9 @@ struct GoogleMapsImportView: View {
         }
         .onDisappear { cancel() }
         .onAppear {
+            if automaticallyResolve,!resolvedInitialInput {
+                resolvedInitialInput = true; resolve()
+            }
             #if DEBUG && targetEnvironment(simulator)
             let preview = ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]
             if preview == "place-link" {
@@ -40,7 +51,7 @@ struct GoogleMapsImportView: View {
             Form {
                 Section {
                     Label("Chuyển địa điểm từ Google Maps",systemImage:"map.fill").font(.headline)
-                    Text("Trong Google Maps, chọn địa điểm → Chia sẻ → Sao chép liên kết. Dán bên dưới để xem ghim trước khi chọn.")
+                    Text("Trong Google Maps, chọn địa điểm → Chia sẻ → HuaSideload, rồi mở app để nhận ghim. Bạn cũng có thể sao chép liên kết và dán bên dưới.")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Section {

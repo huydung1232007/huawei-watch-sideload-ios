@@ -13,6 +13,11 @@ struct NavigationHomeView: View {
     @State private var selectedPin: SelectedMapPin?
     @State private var importingPlace = false
     @State private var panelCollapsed = false
+    @State private var showingStops = false
+    @State private var importInitialInput: String?
+    @State private var importAutomatically = false
+    @State private var shareOpeningID: UUID?
+    @State private var shareTask: Task<Void,Never>?
     private var canCollapsePanel: Bool { !navigator.isNavigating && navigator.hasRoute && !navigator.isCalculating && !navigator.routeChoices.isEmpty }
     private var isCompactPanel: Bool { canCollapsePanel && panelCollapsed }
 
@@ -26,6 +31,10 @@ struct NavigationHomeView: View {
             }
             if let line = navigator.displayPolyline { MapPolyline(line).stroke(.blue,lineWidth: 7) }
             if let place = navigator.destination { Marker(place.name,coordinate: place.item.placemark.coordinate).tint(.orange) }
+            ForEach(Array(navigator.stopovers.enumerated()),id: \.element.id) { index,stop in
+                Marker("\(index+1). \(stop.name)",coordinate:stop.item.placemark.coordinate)
+                    .tint(index < navigator.completedStopCount ? .green : .purple)
+            }
             UserAnnotation()
           }
           .mapControls { MapCompass(); MapUserLocationButton() }
@@ -45,6 +54,7 @@ struct NavigationHomeView: View {
         .safeAreaInset(edge: .bottom,spacing: 0) { bottomPanel }
         .sheet(isPresented: $searching) { DestinationSearchView(navigator: navigator) }
         .sheet(isPresented: $settings) { NavigationSettingsView(navigator: navigator,link: link) }
+        .sheet(isPresented: $showingStops) { RouteStopoversView(navigator:navigator) }
         .sheet(isPresented: $showingFavorites) {
             FavoritePlacesView(navigator:navigator,favorites:navigator.favorites,captureOnOpen:captureFavoriteOnOpen)
         }
@@ -52,9 +62,11 @@ struct NavigationHomeView: View {
             MapPinDestinationView(pin:pin,navigator:navigator,favorites:navigator.favorites)
         }
         .sheet(isPresented:$importingPlace) {
-            GoogleMapsImportView(navigator:navigator,favorites:navigator.favorites)
+            GoogleMapsImportView(navigator:navigator,favorites:navigator.favorites,
+                initialInput:importInitialInput,automaticallyResolve:importAutomatically)
         }
         .onAppear {
+            if let shared = navigator.sharedPlace { presentSharedPlace(shared) }
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("favorite") == true { showingFavorites = true }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "pin" {
@@ -62,14 +74,31 @@ struct NavigationHomeView: View {
             }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("place-link") == true { importingPlace = true }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "map-collapsed" { panelCollapsed = true }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "stopovers" { showingStops = true }
+            if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "navigation-settings" { settings = true }
             #endif
         }
+        .onDisappear { shareTask?.cancel(); shareTask = nil; shareOpeningID = nil }
+        .onChange(of:navigator.sharedPlace?.id) { _,_ in if let shared = navigator.sharedPlace { presentSharedPlace(shared) } }
         .onChange(of:navigator.routeRevision) { _,_ in frameSelectedRoute() }
         .onChange(of:panelCollapsed) { _,_ in frameSelectedRoute() }
         .onChange(of:navigator.destination?.id) { _,_ in panelCollapsed = false }
         .onChange(of:navigator.hasRoute) { _,ready in if !ready { panelCollapsed = false } }
         .onChange(of: navigator.isNavigating) { _, active in
             if active { panelCollapsed = false; withAnimation { camera = .userLocation(followsHeading: true,fallback: .automatic) } }
+        }
+    }
+
+    @MainActor private func presentSharedPlace(_ place: MapShareEnvelope) {
+        guard shareOpeningID != place.id else { return }
+        shareTask?.cancel(); shareOpeningID = place.id
+        searching = false; settings = false; showingFavorites = false; showingStops = false
+        selectedPin = nil; importingPlace = false
+        shareTask = Task {
+            do { try await Task.sleep(for:.milliseconds(600)) } catch { return }
+            guard navigator.sharedPlace?.id == place.id, !Task.isCancelled else { return }
+            importInitialInput = place.link; importAutomatically = true; importingPlace = true
+            navigator.consumedSharedPlace(place.id); shareOpeningID = nil; shareTask = nil
         }
     }
 
@@ -205,10 +234,12 @@ struct NavigationHomeView: View {
             }
             .buttonStyle(.plain)
             HStack {
-                Label("Nhấn giữ để ghim bản đồ",systemImage:"hand.tap")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Button { showingStops = true } label: {
+                    Label(navigator.stopovers.isEmpty ? "Thêm điểm dừng" : "\(navigator.stopovers.count) điểm dừng",systemImage:"point.topleft.down.to.point.bottomright.curvepath")
+                }.font(.caption.bold()).buttonStyle(.bordered)
+                    .disabled(navigator.destination == nil || navigator.isCalculating)
                 Spacer(minLength:8)
-                Button { importingPlace = true } label: { Label("Dán link",systemImage:"link") }
+                Button { importInitialInput = nil; importAutomatically = false; importingPlace = true } label: { Label("Dán link",systemImage:"link") }
                     .font(.caption.bold()).buttonStyle(.bordered).disabled(navigator.isCalculating)
                     .accessibilityLabel("Dán link địa điểm").accessibilityIdentifier("import-place-link")
             }
@@ -344,8 +375,9 @@ struct NavigationHomeView: View {
     }
 }
 
-private struct DestinationSearchView: View {
+struct DestinationSearchView: View {
     @ObservedObject var navigator: RouteNavigator
+    var addingStop = false
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
@@ -358,9 +390,18 @@ private struct DestinationSearchView: View {
                     }.disabled(navigator.isSearching || navigator.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 Section {
+                    if addingStop, !navigator.favorites.places.isEmpty {
+                        ForEach(navigator.favorites.places) { place in
+                            Button {
+                                let item = MKMapItem(placemark:MKPlacemark(coordinate:.init(latitude:place.latitude,longitude:place.longitude)))
+                                item.name = place.name; navigator.addStopover(.init(item:item)); dismiss()
+                            } label: { Label(place.name,systemImage:"star.fill") }
+                        }
+                    }
                     ForEach(navigator.results) { place in
                         Button {
-                            navigator.selectAndCalculate(place); dismiss()
+                            if addingStop { navigator.addStopover(place) } else { navigator.selectAndCalculate(place) }
+                            dismiss()
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(.orange)
@@ -378,7 +419,7 @@ private struct DestinationSearchView: View {
                     Text(navigator.locationStatus).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Điểm đến").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(addingStop ? "Thêm điểm dừng" : "Điểm đến").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Xong") { dismiss() } } }
             .task { if !navigator.hasLocation { navigator.requestLocation() } }
         }
@@ -411,10 +452,12 @@ private struct NavigationSettingsView: View {
                 footer: { Text("Dựa vào hướng di chuyển GPS khi bạn đang đi. Chờ nhiều vị trí chính xác trước khi báo ngược hướng; tạm bỏ qua gần chỗ rẽ, đường cong hoặc GPS yếu. Khi đứng yên, app chờ thêm dữ liệu chuyển động.") }
                 Section {
                     Toggle("Nhắc hai chỗ rẽ sát nhau",isOn:$navigator.chainedTurnsEnabled)
+                    Toggle("Hiện tốc độ km/h",isOn:$navigator.watchSpeedEnabled)
                     Toggle("Hướng sau chỗ rẽ ở ô tốc độ",isOn:$navigator.followingManeuverEnabled)
+                        .disabled(!navigator.watchSpeedEnabled)
                     Toggle("Tổng km/phút trên đồng hồ",isOn:$navigator.watchTripInfoEnabled)
                 } header: { Label("Nội dung Navigation",systemImage:"text.alignleft") }
-                footer: { Text("Dưới 100 m trước chỗ quẹo, ô tốc độ hiện bước sau đó: hướng rẽ và khoảng cách giữa hai chỗ rẽ, hoặc ↑ cùng chiều dài đoạn đi thẳng kế tiếp. Giữ đến khi GPS xác nhận qua chỗ quẹo, rồi trở lại tốc độ nếu chưa gần chỗ quẹo mới. Nhắc hai chỗ rẽ sát nhau vẫn áp dụng cho các chỗ rẽ cách 10–100 m. Tổng km/phút vẫn luân phiên khoảng mỗi 5 giây khi có cập nhật GPS; thời gian là ước tính theo tuyến.") }
+                footer: { Text("Tắt Hiện tốc độ km/h: ô này luôn hiện hướng và khoảng cách của bước sau, dù còn vài km. Bật tốc độ: giữ chế độ đổi sang bước sau ở dưới 100 m trước chỗ quẹo khi bật tùy chọn bên dưới. Nếu không có bước sau hợp lệ, ô để trống. Tổng km/phút luân phiên khoảng mỗi 5 giây; thời gian là ước tính.") }
                 Section {
                     Text(navigator.locationStatus).font(.footnote)
                     Text(link.navigationDeliveryInfo).font(.footnote)
@@ -425,7 +468,7 @@ private struct NavigationSettingsView: View {
                     Text("Lưu điểm đến, quãng đường, thời gian và tốc độ trung bình; không lưu đường GPS chi tiết. Bạn có thể xóa từng chuyến trong tab Lịch sử.").font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {
-                    Text("Tìm địa điểm và bản đồ: Apple. Tuyến xe máy: Valhalla/OpenStreetMap; vị trí đầu/cuối được gửi tới máy chủ FOSSGIS khi tính hoặc tự đổi tuyến.").font(.footnote)
+                    Text("Tìm địa điểm và bản đồ: Apple. Tuyến xe máy: Valhalla/OpenStreetMap; vị trí đầu, điểm dừng và điểm cuối được gửi tới máy chủ FOSSGIS khi tính hoặc tự đổi tuyến.").font(.footnote)
                     Link("© OpenStreetMap contributors",destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                 }
             }

@@ -12,6 +12,9 @@ targets:
   HuaSideload:
     type: application
     platform: iOS
+    dependencies:
+      - target: MapShare
+        embed: true
     sources:
       - path: HuaSideload
         excludes: ["Info.plist"]
@@ -29,10 +32,11 @@ targets:
       path: HuaSideload/Info.plist
       properties:
         CFBundleDisplayName: HuaSideload Lite Test
-        CFBundleShortVersionString: "1.4.1"
-        CFBundleVersion: "26"
-        NSLocalNetworkUsageDescription: Kết nối PC Windows trong cùng mạng để gửi lệnh nhạc và video bạn chọn từ đồng hồ.
-        NSCameraUsageDescription: Quét mã QR kết nối PC Remote trên máy tính của bạn.
+        CFBundleShortVersionString: "1.5.0"
+        CFBundleVersion: "27"
+        CFBundleURLTypes:
+          - CFBundleURLName: huasideload.maps
+            CFBundleURLSchemes: [huasideload]
         NSBluetoothAlwaysUsageDescription: Needed to connect to your Huawei watch over Bluetooth.
         # voip: the watch speaker rings the watch with a CallKit call (refused without it); audio: keeps it playing when locked
         NSLocationWhenInUseUsageDescription: Dùng vị trí để tìm tuyến đường và gửi chỉ dẫn tới đồng hồ trong chuyến đi bạn bắt đầu, kể cả khi khóa màn hình.
@@ -43,3 +47,32 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ${HUASIDELOAD_BUNDLE_ID}
         TARGETED_DEVICE_FAMILY: "1"
+  MapShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+        excludes: ["Info.plist"]
+      - path: HuaSideload/MapShareEnvelope.swift
+      - path: HuaSideload/MapPlaceLink.swift
+      - path: HuaSideload/GooglePlaceIdentity.swift
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: HuaSideload
+        CFBundleShortVersionString: "1.5.0"
+        CFBundleVersion: "27"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).MapShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${HUASIDELOAD_BUNDLE_ID}.maps-share
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES

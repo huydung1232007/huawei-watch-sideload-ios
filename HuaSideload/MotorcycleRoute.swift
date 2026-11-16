@@ -9,6 +9,7 @@ struct MotorcycleRoute {
     let duration: Double
     let distance: Double
     let via: String
+    var stopEndIndexes: [Int] = []
 
     enum RouteError: LocalizedError {
         case invalid, highway, wrongMode, provider(String)
@@ -22,12 +23,13 @@ struct MotorcycleRoute {
         }
     }
 
-    static func request(origin: Coordinate, destination: Coordinate, alternatives: Bool = true) throws -> Data {
-        guard [origin, destination].allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }) else { throw RouteError.invalid }
+    static func request(origin: Coordinate, destination: Coordinate, alternatives: Bool = true, stops: [Coordinate] = []) throws -> Data {
+        let places = [origin] + stops + [destination]
+        guard stops.count <= 3, places.allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }) else { throw RouteError.invalid }
         return try JSONSerialization.data(withJSONObject: [
-            "locations": [["lat": origin.latitude, "lon": origin.longitude], ["lat": destination.latitude, "lon": destination.longitude]],
+            "locations": places.map { ["lat": $0.latitude, "lon": $0.longitude, "type": "break"] as [String: Any] },
             "costing": "motorcycle", "costing_options": ["motorcycle": ["use_highways": 0, "use_tolls": 0, "use_trails": 0]],
-            "units": "kilometers", "language": "en-US", "alternates": alternatives ? 2 : 0
+            "units": "kilometers", "language": "en-US", "alternates": alternatives && stops.isEmpty ? 2 : 0
         ])
     }
 
@@ -37,21 +39,33 @@ struct MotorcycleRoute {
         if let error = root["error"] as? String { throw RouteError.provider(error) }
         guard let trip = root["trip"] as? [String: Any], trip["status"] as? Int == 0,
               trip["units"] as? String == "kilometers", let summary = trip["summary"] as? [String: Any],
-              let legs = trip["legs"] as? [[String: Any]], legs.count == 1,
-              let shape = legs[0]["shape"] as? String,
-              let maneuvers = legs[0]["maneuvers"] as? [[String: Any]], !maneuvers.isEmpty,
+              let legs = trip["legs"] as? [[String: Any]], (1...4).contains(legs.count),
               let duration = summary["time"] as? Double, duration.isFinite, duration > 0,
               let length = summary["length"] as? Double, length.isFinite, length > 0 else { throw RouteError.invalid }
         // use_highways is a preference, not an exclusion. Independently reject a
         // returned highway route, including highway endpoints; never fall back to auto.
-        guard summary["has_highway"] as? Bool == false,
-              !maneuvers.contains(where: { $0["highway"] as? Bool == true }) else { throw RouteError.highway }
-        let coordinates = try decodeShape(shape)
+        guard summary["has_highway"] as? Bool == false else { throw RouteError.highway }
+        var coordinates = [Coordinate](), stopEnds = [Int](), allManeuvers = [[String: Any]]()
         var steps: [Step] = []
+        for (legIndex, leg) in legs.enumerated() {
+        guard let shape = leg["shape"] as? String, let maneuvers = leg["maneuvers"] as? [[String: Any]], !maneuvers.isEmpty else { throw RouteError.invalid }
+        guard !maneuvers.contains(where: { $0["highway"] as? Bool == true }),
+              (leg["summary"] as? [String: Any])?["has_highway"] as? Bool != true else { throw RouteError.highway }
+        let legPoints = try decodeShape(shape)
+        let duplicate = coordinates.last == legPoints.first
+        if let previous = coordinates.last, let first = legPoints.first {
+            let lat = (first.latitude-previous.latitude)*Double.pi/180
+            let lon = (first.longitude-previous.longitude)*Double.pi/180
+            let value = pow(sin(lat/2),2)+cos(first.latitude*Double.pi/180)*cos(previous.latitude*Double.pi/180)*pow(sin(lon/2),2)
+            guard 6_371_000*2*atan2(sqrt(max(0,value)),sqrt(max(0,1-value))) <= 20 else { throw RouteError.invalid }
+        }
+        let offset = duplicate ? coordinates.count-1 : coordinates.count
+        coordinates.append(contentsOf: duplicate ? Array(legPoints.dropFirst()) : legPoints)
+        guard coordinates.count <= 100_000 else { throw RouteError.invalid }
         var lastIndex = 0
         for maneuver in maneuvers {
             guard maneuver["travel_type"] as? String == "motorcycle" else { throw RouteError.wrongMode }
-            guard let index = maneuver["begin_shape_index"] as? Int, index >= lastIndex, index < coordinates.count,
+            guard let index = maneuver["begin_shape_index"] as? Int, index >= lastIndex, index < legPoints.count,
                   let type = maneuver["type"] as? Int, let text = maneuver["instruction"] as? String,
                   !text.isEmpty, text.utf8.count < 4096 else { throw RouteError.invalid }
             let names = (maneuver["street_names"] as? [String])?.prefix(2).joined(separator: " / ") ?? ""
@@ -59,7 +73,7 @@ struct MotorcycleRoute {
             let translated: String
             switch type {
             case 1...3: translated = "Khởi hành" + (names.isEmpty ? " theo tuyến" : " theo " + names)
-            case 4...6: translated = "Đến điểm đến"
+            case 4...6: translated = legIndex < legs.count-1 ? "Đến điểm dừng \(legIndex+1)" : "Đến điểm đến"
             case 25: translated = "Nhập làn" + (names.isEmpty ? "" : " vào " + names)
             case 26:
                 if let count = maneuver["roundabout_exit_count"] as? Int, count > 0 { translated = "Vào vòng xuyến; ra lối số \(count)" }
@@ -67,10 +81,13 @@ struct MotorcycleRoute {
             case 27: translated = "Ra khỏi vòng xuyến" + (names.isEmpty ? "" : " vào " + names)
             default: translated = direction == .unspecified ? text : direction.title + (names.isEmpty ? "" : " vào " + names)
             }
-            steps.append(Step(index: index, instruction: translated, turn: direction))
+            steps.append(Step(index: offset+index, instruction: translated, turn: direction))
             lastIndex = index
         }
-        let namedRoads: [(String, Double)] = maneuvers.compactMap { maneuver in
+        if legIndex < legs.count-1 { stopEnds.append(coordinates.count-1) }
+        allManeuvers.append(contentsOf: maneuvers)
+        }
+        let namedRoads: [(String, Double)] = allManeuvers.compactMap { maneuver in
             guard let name = (maneuver["street_names"] as? [String])?.first, !name.isEmpty else { return nil }
             return (name, maneuver["length"] as? Double ?? 0)
         }.sorted { $0.1 > $1.1 }
@@ -80,7 +97,7 @@ struct MotorcycleRoute {
             if roads.count == 2 { break }
         }
         return MotorcycleRoute(coordinates: coordinates, steps: steps, duration: duration, distance: length * 1000,
-                               via: String(roads.joined(separator: " · ").prefix(140)))
+                               via: String(roads.joined(separator: " · ").prefix(140)),stopEndIndexes: stopEnds)
     }
 
     static func decodeOptions(_ data: Data) throws -> [MotorcycleRoute] {

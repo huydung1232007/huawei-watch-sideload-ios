@@ -64,7 +64,7 @@ protocol WatchFeatureProvider {
 @MainActor
 enum WatchFeatures {
     static func load() -> [WatchFeature] {
-        var features: [WatchFeature] = [HelloFeature(), NavMiniFeature(), PCRemoteFeature()]
+        var features: [WatchFeature] = [HelloFeature(), NavMiniFeature()]
         if let type = NSClassFromString("HuaSideloadPrivateFeatures") as? NSObject.Type,
            let provider = type.init() as? WatchFeatureProvider {
             features += provider.makeFeatures()

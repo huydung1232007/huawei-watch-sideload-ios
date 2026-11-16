@@ -2,6 +2,22 @@ import XCTest
 @testable import HuaSideloadParsing
 
 final class WatchGuidancePresentationTests: XCTestCase {
+    func testSpeedOffAlwaysShowsFollowingEvenKilometersAwayWithoutLatchingSpeedOn() {
+        var policy = FollowingManeuverPolicy()
+        let show = policy.shouldShow(maneuver:2,current:.straight,remaining:8000,enabled:false,always:true)
+        XCTAssertTrue(show)
+        XCTAssertEqual(WatchGuidancePresentation.speedField(metersPerSecond:10,next:.left,gap:2400,straightLength:nil,showFollowing:show,showSpeed:false),"←;2.4km")
+        XCTAssertEqual(WatchGuidancePresentation.speedField(metersPerSecond:10,next:.straight,gap:0,straightLength:4000,showFollowing:show,showSpeed:false),"↑;4km")
+        XCTAssertFalse(policy.shouldShow(maneuver:2,current:.left,remaining:8000,enabled:true))
+        XCTAssertFalse(policy.shouldShow(maneuver:2,current:.left,remaining:.nan,enabled:true,always:true))
+    }
+    func testSpeedOffCannotFallBackToKmhOrInventUnknownFollowingStep() {
+        for next in [nil,.unspecified,.straight] as [PineNavigationWire.Turn?] {
+            XCTAssertEqual(WatchGuidancePresentation.speedField(metersPerSecond:10,next:next,gap:60,straightLength:nil,showFollowing:true,showSpeed:false),"")
+        }
+        XCTAssertEqual(WatchGuidancePresentation.speedField(metersPerSecond:10,next:.destination,gap:5000,straightLength:nil,showFollowing:true,showSpeed:false),"•;5km")
+        XCTAssertEqual(WatchGuidancePresentation.speedField(metersPerSecond:10,next:.left,gap:.nan,straightLength:nil,showFollowing:true,showSpeed:false),"")
+    }
     func testFollowingTurnUsesDirectionAfterPrimaryAndDistanceAfterIt() {
         var policy = FollowingManeuverPolicy()
         let show = policy.shouldShow(maneuver:2,current:.right,remaining:30,enabled:true)

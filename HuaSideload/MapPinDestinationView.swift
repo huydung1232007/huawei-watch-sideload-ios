@@ -45,6 +45,14 @@ struct MapPinDestinationView: View {
                     } label: { Label("Đi tới đây",systemImage:"location.north.fill") }
                     .disabled(!validName || navigator.isNavigating || navigator.isCalculating)
                     .accessibilityIdentifier("pin-route")
+                    if navigator.destination != nil {
+                        Button {
+                            guard validName,navigator.canAddStopover else { return }
+                            let item = MKMapItem(placemark:MKPlacemark(coordinate:pin.coordinate)); item.name = trimmedName
+                            navigator.addStopover(.init(item:item)); navigator.calculateWhenReady(); dismiss()
+                        } label: { Label("Thêm làm điểm dừng",systemImage:"plus.circle") }
+                        .disabled(!validName || !navigator.canAddStopover)
+                    }
                     Button {
                         guard validName else { return }
                         let place = FavoritePlace(name:trimmedName,latitude:pin.coordinate.latitude,longitude:pin.coordinate.longitude)

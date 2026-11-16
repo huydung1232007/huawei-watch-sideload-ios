@@ -20,6 +20,7 @@ build/
 DerivedData/
 HuaSideload.xcodeproj/
 HuaSideload/Info.plist
+ShareExtension/Info.plist
 node_modules/
 *.xcuserstate
 xcuserdata/

@@ -54,9 +54,6 @@ struct ContentView: View {
             .tag(Tab.watch)
 
             page("Tiện ích") {
-                if let remote = link.features.compactMap({ $0 as? PCRemoteFeature }).first {
-                    remote.sections()
-                }
                 Section {
                     NavigationLink {
                         List { logSection }.navigationTitle("Nhật ký kết nối")
@@ -68,9 +65,7 @@ struct ContentView: View {
                     if !filmMode { musicSection }
                     WatchSpeakerSection(speaker: link.speaker)
                     if !filmMode {
-                        ForEach(link.features.indices,id: \.self) { index in
-                            if !(link.features[index] is PCRemoteFeature) { link.features[index].sections() }
-                        }
+                        ForEach(link.features.indices,id: \.self) { index in link.features[index].sections() }
                     }
                 } else { pairFirstSection }
             }
@@ -80,6 +75,7 @@ struct ContentView: View {
         // While filming, serial numbers and MAC addresses stay masked, in the log too.
          .onAppear {
             if filmMode { link.revealIdentity = false }
+            receiveSharedMapClipboard()
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "history" { tab = .history }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "fresh-pin" { tab = .watch }
@@ -89,7 +85,19 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             link.routeNavigator.history.retryLoadingIfNeeded()
             link.routeNavigator.favorites.retryLoadingIfNeeded()
+            receiveSharedMapClipboard()
         }
+        .onOpenURL { url in
+            if let place = try? MapShareEnvelope.fromAppURL(url) { tab = .navigation; link.routeNavigator.receiveSharedPlace(place) }
+        }
+    }
+
+    private func receiveSharedMapClipboard() {
+        let clipboard = UIPasteboard.general
+        guard clipboard.contains(pasteboardTypes:[MapShareEnvelope.pasteboardType]),
+              let data = clipboard.data(forPasteboardType:MapShareEnvelope.pasteboardType),
+              let place = try? MapShareEnvelope.decode(data) else { return }
+        tab = .navigation; link.routeNavigator.receiveSharedPlace(place)
     }
 
     // One tab: a list with the title and the shared toolbar (filming mode, language)
