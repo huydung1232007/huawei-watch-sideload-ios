@@ -24,3 +24,6 @@ node_modules/
 *.xcuserstate
 xcuserdata/
 .DS_Store
+tools/pc-remote/.private/
+tools/pc-remote/vendor/
+**/__pycache__/

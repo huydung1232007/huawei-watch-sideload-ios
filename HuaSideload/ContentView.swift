@@ -54,6 +54,9 @@ struct ContentView: View {
             .tag(Tab.watch)
 
             page("Tiện ích") {
+                if let remote = link.features.compactMap({ $0 as? PCRemoteFeature }).first {
+                    remote.sections()
+                }
                 Section {
                     NavigationLink {
                         List { logSection }.navigationTitle("Nhật ký kết nối")
@@ -65,7 +68,9 @@ struct ContentView: View {
                     if !filmMode { musicSection }
                     WatchSpeakerSection(speaker: link.speaker)
                     if !filmMode {
-                        ForEach(link.features.indices,id: \.self) { index in link.features[index].sections() }
+                        ForEach(link.features.indices,id: \.self) { index in
+                            if !(link.features[index] is PCRemoteFeature) { link.features[index].sections() }
+                        }
                     }
                 } else { pairFirstSection }
             }

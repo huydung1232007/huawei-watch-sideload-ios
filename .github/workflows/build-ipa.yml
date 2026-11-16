@@ -13,6 +13,7 @@ on:
       - 'project.yml'
       - 'generate.sh'
       - 'Config/**'
+      - 'tools/pc-remote/**'
       - '.github/workflows/build-ipa.yml'
   workflow_dispatch:
     inputs:
@@ -48,6 +49,9 @@ jobs:
         run: |
           set -o pipefail
           swift test 2>&1 | tee test.log
+
+      - name: Test PC remote protocol and replay protection
+        run: python3 -m unittest discover -s tools/pc-remote -p test_pc_remote.py -v
 
       - name: Generate Xcode project
         env:
