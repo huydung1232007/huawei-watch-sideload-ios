@@ -50,7 +50,10 @@ struct WatchIdentityEvidence {
         let fields = tlv.items.filter { $0.tag == 0x05 }
         identityBytes = fields.first?.value.count
         guard !fields.isEmpty else { identityState = .missing; return nil }
-        guard fields.count == 1 else { identityState = .unsupported; return nil }
+        guard fields.count == 1, (64...128).contains(fields[0].value.count) else {
+            identityState = .unsupported
+            return nil
+        }
         var bytes = fields[0].value
         let padding: Set<UInt8> = [0, 9, 10, 13, 32]
         while let first = bytes.first, padding.contains(first) { bytes.removeFirst() }
@@ -67,16 +70,21 @@ struct WatchIdentityEvidence {
 
     mutating func recordPlatform(_ tlv: HuaweiTLV) {
         platformAPI = nil; platformType = nil; platformWidth = nil; platformHeight = nil
-        platformCode = tlv.int(0x7F)
+        platformCode = Self.number(tlv, 0x7F)
         platformLayout = Self.layout(tlv)
         guard let outer = tlv.value(0x81), let groups = try? HuaweiTLV.parse(outer),
               let inner = groups.items.first(where: { $0.tag == 0x82 }),
               let params = try? HuaweiTLV.parse(inner.value) else { return }
         platformLayout += " / " + Self.layout(params)
-        platformType = params.int(0x03)
-        platformAPI = params.int(0x04)
-        platformWidth = params.int(0x07)
-        platformHeight = params.int(0x08)
+        platformType = Self.number(params, 0x03)
+        platformAPI = Self.number(params, 0x04)
+        platformWidth = Self.number(params, 0x07)
+        platformHeight = Self.number(params, 0x08)
+    }
+
+    private static func number(_ tlv: HuaweiTLV, _ tag: UInt8) -> Int? {
+        guard let value = tlv.value(tag), (1...4).contains(value.count) else { return nil }
+        return value.reduce(0) { ($0 << 8) | Int($1) }
     }
 
     mutating func platformUnavailable() {

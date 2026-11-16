@@ -73,4 +73,13 @@ final class WatchIdentityEvidenceTests: XCTestCase {
         XCTAssertNil(evidence.platformAPI)
         XCTAssertTrue(evidence.report().contains("no usable response"))
     }
+
+    func testOversizedNumericFieldsCannotOverflowOrLeakRawBytes() {
+        var evidence = WatchIdentityEvidence()
+        let params = HuaweiTLV().with(4, [UInt8](repeating: 255, count: 16)).with(3, [38])
+        evidence.recordPlatform(HuaweiTLV().with(0x81, HuaweiTLV().with(0x82, params.serialize()).serialize()))
+        XCTAssertNil(evidence.platformAPI)
+        XCTAssertEqual(evidence.platformType, 38)
+        XCTAssertTrue(evidence.report().contains("04:16B"))
+    }
 }
