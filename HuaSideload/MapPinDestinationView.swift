@@ -54,7 +54,9 @@ struct MapPinDestinationView: View {
                         Button {
                             guard validName,navigator.canAddStopover else { return }
                             let item = MKMapItem(placemark:MKPlacemark(coordinate:pin.coordinate)); item.name = trimmedName
-                            navigator.addStopover(.init(item:item)); navigator.calculateWhenReady(); dismiss()
+                            navigator.addStopover(.init(item:item))
+                            if !onlyStopover { navigator.calculateWhenReady() }
+                            dismiss()
                         } label: { Label("Thêm làm điểm dừng",systemImage:"plus.circle") }
                         .disabled(!validName || !navigator.canAddStopover)
                     }
@@ -64,7 +66,9 @@ struct MapPinDestinationView: View {
                         if favorites.save(place) { dismiss() }
                     } label: { Label("Lưu yêu thích",systemImage:"star.fill") }
                     .disabled(!validName).accessibilityIdentifier("pin-save")
-                } footer: { Text("Kiểm tra ghim trước khi chọn. Đi tới đây sẽ tính tuyến từ vị trí GPS của bạn; lưu yêu thích chỉ lưu điểm này.") }
+                } footer: {
+                    Text(onlyStopover ? "Kiểm tra ghim rồi thêm vào danh sách điểm dừng. Bấm Xong ở danh sách để tính toàn bộ hành trình." : "Kiểm tra ghim trước khi chọn. Đi tới đây sẽ tính tuyến từ vị trí GPS của bạn; lưu yêu thích chỉ lưu điểm này.")
+                }
                 if let message = favorites.storageMessage {
                     Section { Text(message).font(.footnote).foregroundStyle(.red) }
                 }
