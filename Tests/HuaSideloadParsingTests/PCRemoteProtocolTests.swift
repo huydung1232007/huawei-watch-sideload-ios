@@ -71,4 +71,14 @@ final class PCRemoteProtocolTests: XCTestCase {
         state.reset(); XCTAssertEqual(state.volume, 8)
         XCTAssertNil(state.command(button: nil, volume: nil))
     }
+    func testReadsPairingConfigurationFromQRPhotoFixture() throws {
+        let fixture = try fixture()
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "pc-remote-qr-fixture", withExtension: "png"))
+        let text = try PCRemoteQRImage.decode(Data(contentsOf: url))
+        XCTAssertEqual(try PCRemoteConfiguration(text: text), fixture.configuration)
+    }
+    func testQRPhotoRejectsEmptyAndInvalidImageData() {
+        XCTAssertThrowsError(try PCRemoteQRImage.decode(Data()))
+        XCTAssertThrowsError(try PCRemoteQRImage.decode(Data("not an image".utf8)))
+    }
 }

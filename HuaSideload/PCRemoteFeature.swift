@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 @MainActor
 final class PCRemoteFeature: ObservableObject, WatchFeature {
@@ -52,6 +53,10 @@ final class PCRemoteFeature: ObservableObject, WatchFeature {
         setEnabled(false); secrets.delete(configKey)
         configuration = nil; verified = false
         status = "Đã bỏ PC đã lưu. Quét QR để thêm lại."; failed = false
+    }
+    func reportQRImageError() {
+        failed = true
+        status = "Không tìm thấy mã PC Remote trong ảnh. Chọn ảnh chụp rõ toàn bộ QR trên PC."
     }
     func setEnabled(_ value: Bool) {
         guard !value || (configuration != nil && verified) else { return }
@@ -166,6 +171,8 @@ struct PCRemoteView: View {
     @State private var scanning = false
     @State private var enteringCode = false
     @State private var code = ""
+    @State private var qrPhoto: PhotosPickerItem?
+    @State private var readingPhoto = false
     var body: some View {
         Form {
             Section {
@@ -184,6 +191,9 @@ struct PCRemoteView: View {
                     LabeledContent("Địa chỉ", value: "\(configuration.host):\(configuration.port)")
                 }
                 Button { scanning = true } label: { Label("Quét mã QR trên PC", systemImage: "qrcode.viewfinder") }
+                PhotosPicker(selection: $qrPhoto, matching: .images, photoLibrary: .shared()) {
+                    Label(readingPhoto ? "Đang đọc mã QR…" : "Chọn ảnh mã QR", systemImage: "photo")
+                }.disabled(readingPhoto)
                 Button("Dán mã kết nối") {
                     if let text = UIPasteboard.general.string { feature.importConfiguration(text) }
                     else { enteringCode = true }
@@ -223,6 +233,18 @@ struct PCRemoteView: View {
             }
         }
         .navigationTitle("Điều khiển PC").navigationBarTitleDisplayMode(.inline)
+        .onChange(of: qrPhoto) { _, item in
+            guard let item else { return }
+            readingPhoto = true
+            Task {
+                defer { readingPhoto = false; qrPhoto = nil }
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self) else { throw PCRemoteError.configuration }
+                    let text = try await Task.detached(priority: .userInitiated) { try PCRemoteQRImage.decode(data) }.value
+                    feature.importConfiguration(text)
+                } catch { feature.reportQRImageError() }
+            }
+        }
         .sheet(isPresented: $scanning) {
             PCRemoteQRScanner { text in scanning = false; feature.importConfiguration(text) }
         }

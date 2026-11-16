@@ -7,12 +7,14 @@ final class PCRemoteTransaction: @unchecked Sendable {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "HuaSideload.PCRemote")
     private let frame: Data
+    private let timeoutInterval: Double
     private var continuation: CheckedContinuation<Data, Error>?
     private var finished = false
     private var timeout: DispatchWorkItem?
 
-    init(configuration: PCRemoteConfiguration, frame: Data) {
+    init(configuration: PCRemoteConfiguration, frame: Data, timeout: Double = 6) {
         self.frame = frame
+        self.timeoutInterval = timeout
         connection = NWConnection(host: NWEndpoint.Host(configuration.host),
                                   port: NWEndpoint.Port(rawValue: UInt16(configuration.port))!, using: .tcp)
     }
@@ -24,7 +26,7 @@ final class PCRemoteTransaction: @unchecked Sendable {
                     self.continuation = continuation
                     let timeout = DispatchWorkItem { self.finish(.failure(PCRemoteError.timeout)) }
                     self.timeout = timeout
-                    self.queue.asyncAfter(deadline: .now() + 6, execute: timeout)
+                    self.queue.asyncAfter(deadline: .now() + self.timeoutInterval, execute: timeout)
                     self.connection.stateUpdateHandler = { state in
                         switch state {
                         case .ready: self.send()
@@ -80,7 +82,10 @@ final class PCRemoteTransport {
     func send(_ command: PCRemoteCommand, configuration: PCRemoteConfiguration) async throws {
         try Task.checkCancellation()
         let request = try PCRemoteWire.request(command, configuration: configuration)
-        let current = PCRemoteTransaction(configuration: configuration, frame: try PCRemoteWire.frame(request))
+        // The first foreground ping may be waiting for iOS's Local Network
+        // permission dialog. Media commands retain their short timeout.
+        let current = PCRemoteTransaction(configuration: configuration, frame: try PCRemoteWire.frame(request),
+                                          timeout: command == .ping ? 20 : 6)
         transaction = current
         defer { if transaction === current { transaction = nil } }
         let reply = try await current.run()
