@@ -15,7 +15,7 @@ final class DestinationSearchModel: NSObject, ObservableObject, MKLocalSearchCom
     @Published private(set) var results: [RouteNavigator.Destination] = []
     @Published private(set) var selected: SelectedMapPin?
     @Published private(set) var message = ""
-    @Published private(set) var recentQueries: [String] = UserDefaults.standard.stringArray(forKey: Self.recentStorageKey) ?? []
+    @Published private(set) var recentQueries: [String] = UserDefaults.standard.stringArray(forKey: DestinationSearchModel.recentStorageKey) ?? []
     private static let recentStorageKey = "recentDestinationSearchesV1"
     private var revision = UUID()
     private var debounce: Task<Void,Never>?
