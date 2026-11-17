@@ -1,8 +1,9 @@
 import Foundation
 
-// In-app language (English / Turkish), chosen from the globe menu on the main screen.
-// The first launch follows the phone's language; English is the default for everything else.
+// In-app language (Vietnamese / English / Turkish), chosen from the globe menu on the main screen.
+// On iPhone the app defaults to Vietnamese; on macOS unit-test hosts it follows the host locale unless overridden.
 enum AppLanguage: String, CaseIterable, Identifiable {
+    case vietnamese = "vi"
     case english = "en"
     case turkish = "tr"
 
@@ -12,6 +13,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .vietnamese: return "Tiếng Việt"
         case .english: return "English"
         case .turkish: return "Türkçe"
         }
@@ -21,13 +23,24 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         if let saved = UserDefaults.standard.string(forKey: storageKey), let language = AppLanguage(rawValue: saved) {
             return language
         }
-        return Locale.preferredLanguages.first?.hasPrefix("tr") == true ? .turkish : .english
+        let preferred = Locale.preferredLanguages.first?.lowercased() ?? ""
+        if preferred.hasPrefix("tr") { return .turkish }
+        if preferred.hasPrefix("vi") { return .vietnamese }
+        #if os(iOS)
+        return .vietnamese
+        #else
+        return .english
+        #endif
     }
 }
 
-/// Picks the English or the Turkish text according to the in-app language.
-func L(_ english: String, _ turkish: String) -> String {
-    AppLanguage.current == .turkish ? turkish : english
+/// Picks the Vietnamese, English or Turkish text according to the in-app language.
+func L(_ english: String, _ turkish: String, vi vietnamese: String? = nil) -> String {
+    switch AppLanguage.current {
+    case .vietnamese: return vietnamese ?? english
+    case .turkish: return turkish
+    case .english: return english
+    }
 }
 
 enum AppInfo {

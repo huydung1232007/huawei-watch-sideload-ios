@@ -22,7 +22,7 @@ struct LogEntry: Identifiable {
 
 @MainActor
 final class WatchLink: NSObject, ObservableObject {
-    @Published private(set) var bluetoothState = L("Starting…", "Başlatılıyor…")
+    @Published private(set) var bluetoothState = L("Starting…", "Başlatılıyor…", vi: "Đang khởi động…")
     @Published private(set) var devices: [FoundDevice] = []
     @Published private(set) var isScanning = false
     @Published private(set) var isConnecting = false
@@ -44,14 +44,19 @@ final class WatchLink: NSObject, ObservableObject {
     @Published private(set) var navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
     @Published private(set) var navigationDeliveryInfo = "Chưa có thời gian xác nhận chỉ dẫn."
     private var navigationPeer: PineNavigationWire.PeerIdentity?
+    private var navigationPeerWatchID: UUID?
     private var navigationIsOpen = false
+    private var watchDeliveryPolicy = WatchDeliveryPolicy()
     let routeNavigator = RouteNavigator()
     private var routeOutbox = NavigationOutbox()
     private var routeContentGeneration = 0
     private var routeDelivery: Task<Void, Never>?
     private var routeDeliveryGeneration = 0
     private var routeChanges: AnyCancellable?
-    var commandsLocked: Bool { busy != nil || routeNavigator.isNavigating || routeDelivery != nil }
+    var commandsLocked: Bool { busy != nil || (isPaired && routeNavigator.isNavigating) || routeDelivery != nil }
+    var canResendWatchGuidance: Bool {
+        isPaired && routeNavigator.isNavigating && (watchDeliveryPolicy.watchAppClosed || watchDeliveryPolicy.consecutiveFailures > 0)
+    }
     // Identity details (UDID, serial number, MAC) stay hidden on screen and in the log, e.g. while filming
     @Published var revealIdentity = false
     private var secrets: [String] = []
@@ -110,6 +115,7 @@ final class WatchLink: NSObject, ObservableObject {
         routeNavigator.onRouteReset = { [weak self] in
             guard let self else { return }
             self.routeOutbox.clear(); self.routeContentGeneration &+= 1
+            self.watchDeliveryPolicy.reset()
         }
         routeNavigator.onStop = { [weak self] in self?.queueRouteStop() }
         speaker.log = { [weak self] kind, text in self?.append(kind, text) }
@@ -119,12 +125,12 @@ final class WatchLink: NSObject, ObservableObject {
             log: { [weak self] kind, text in self?.append(kind, text) }
         )
         session.onMusicScreenOpened = { [weak self] in
-            self?.append(.success, L("⌚ Music screen opened on the watch", "⌚ Saatte müzik ekranı açıldı"))
+            self?.append(.success, L("⌚ Music screen opened on the watch", "⌚ Saatte müzik ekranı açıldı", vi: "⌚ Đã mở màn hình nhạc trên đồng hồ"))
             self?.musicScreenOwner?.musicScreenOpened()
         }
         session.onMusicButton = { [weak self] button, volume in
-            let name = button?.name ?? volume.map { L("volume \($0)", "ses \($0)") } ?? L("unknown button", "bilinmeyen tuş")
-            self?.append(.success, L("⌚ Button on the watch: \(name)", "⌚ Saatten tuş: \(name)"))
+            let name = button?.name ?? volume.map { L("volume \($0)", "ses \($0)", vi: "âm lượng \($0)") } ?? L("unknown button", "bilinmeyen tuş", vi: "nút không rõ")
+            self?.append(.success, L("⌚ Button on the watch: \(name)", "⌚ Saatten tuş: \(name)", vi: "⌚ Nút từ đồng hồ: \(name)"))
             self?.musicScreenOwner?.musicButton(button, volume: volume)
         }
         session.onMusicFileInfo = { [weak self] index, fileName in
@@ -132,7 +138,7 @@ final class WatchLink: NSObject, ObservableObject {
             let meta = self.musicMetadata[fileName] ?? ((fileName as NSString).deletingPathExtension, "")
             self.session.send(MusicControl.serviceId, MusicControl.uploadInfoCommand,
                               MusicControl.uploadInfoReply(index: index, title: meta.title, artist: meta.artist))
-            self.append(.info, L("The watch asked for song info: \(fileName) → \(meta.title)", "Saat şarkı bilgisini sordu: \(fileName) → \(meta.title)"))
+            self.append(.info, L("The watch asked for song info: \(fileName) → \(meta.title)", "Saat şarkı bilgisini sordu: \(fileName) → \(meta.title)", vi: "Đồng hồ hỏi thông tin bài hát: \(fileName) → \(meta.title)"))
         }
         session.onPairingStage = { [weak self] stage in self?.pairingStage = stage }
         session.onIdentityEvidence = { [weak self] evidence in
@@ -146,7 +152,7 @@ final class WatchLink: NSObject, ObservableObject {
         session.onWatchFaceConfirm = { [weak self] report in self?.watchFaceConfirmed(report) }
         session.onAppInstallStatus = { [weak self] status, package in
             let kind: LogKind = status == 102 ? .success : (status == 103 || status == 106 ? .error : .info)
-            self?.append(kind, "⌚ Saat: \(WatchApps.describeStatus(status)) \(package)")
+            self?.append(kind, L("⌚ Watch: \(WatchApps.describeStatus(status)) \(package)", "⌚ Saat: \(WatchApps.describeStatus(status)) \(package)", vi: "⌚ Đồng hồ: \(WatchApps.describeStatus(status)) \(package)"))
             self?.lastInstallStatus = status
             self?.identityEvidence.installStatus = status
         }
@@ -157,15 +163,21 @@ final class WatchLink: NSObject, ObservableObject {
                     switch control {
                     case .ping:
                         self.navigationIsOpen = true
+                        self.watchDeliveryPolicy.watchOpened()
                         self.navigationStatus = "Navigation đang chờ chỉ dẫn."
+                        if self.routeNavigator.isNavigating { self.routeNavigator.resendCurrentGuidance() }
                     case .initialize:
                         self.navigationIsOpen = true
+                        self.watchDeliveryPolicy.watchOpened()
                         self.navigationStatus = "Navigation đã mở trên đồng hồ."
+                        if self.routeNavigator.isNavigating { self.routeNavigator.resendCurrentGuidance() }
                     case .exit:
                         self.navigationIsOpen = false
-                        self.navigationStatus = "Navigation đã đóng trên đồng hồ."
+                        self.watchDeliveryPolicy.watchExited()
                         self.routeOutbox.clear()
-                        self.routeNavigator.stop(reason: "Navigation đã đóng trên đồng hồ. Mở lại rồi bấm Bắt đầu.", notifyWatch: false)
+                        self.navigationStatus = self.routeNavigator.isNavigating
+                            ? "Navigation đã đóng trên đồng hồ. Mở lại trên đồng hồ để nhận tiếp chỉ dẫn."
+                            : "Navigation đã đóng trên đồng hồ."
                     }
                     self.append(.info, "Navigation control: \(control.rawValue)")
                 } else {
@@ -178,7 +190,7 @@ final class WatchLink: NSObject, ObservableObject {
                 return
             }
             guard let bridge = self.bridge(for: source) else {
-                self.append(.info, L("P2P data from \(source) (\(data.count) bytes), this package is not bundled in the app", "Saatten P2P veri: \(source) (\(data.count) bayt), bu paket uygulamanın içinde yok"))
+                self.append(.info, L("P2P data from \(source) (\(data.count) bytes), this package is not bundled in the app", "Saatten P2P veri: \(source) (\(data.count) bayt), bu paket uygulamanın içinde yok", vi: "Dữ liệu P2P từ \(source) (\(data.count) byte), gói này không có trong ứng dụng"))
                 return
             }
             bridge.receive(from: source, data: data)
@@ -187,6 +199,7 @@ final class WatchLink: NSObject, ObservableObject {
             guard let self, message.source == PineNavigationWire.watchPackage else { return }
             if let peer = PineNavigationWire.peerIdentity(from: message) {
                 self.navigationPeer = peer
+                self.navigationPeerWatchID = self.peripheral?.identifier
                 self.append(.info, "Navigation peer identity learned from watch; phone differs from APK: \(peer.phoneFingerprint != PineNavigationWire.phoneFingerprint)")
             } else if message.kind == P2P.Kind.data {
                 self.append(.info, "Navigation peer metadata: watch tag \(message.sourceFingerprint?.utf8.count ?? 0)B, phone tag \(message.destinationFingerprint?.utf8.count ?? 0)B; using APK identity fallback")
@@ -251,14 +264,14 @@ final class WatchLink: NSObject, ObservableObject {
 
     func startScan() {
         guard central.state == .poweredOn else {
-            append(.error, L("Bluetooth is not ready: \(bluetoothState)", "Bluetooth hazır değil: \(bluetoothState)"))
+            append(.error, L("Bluetooth is not ready: \(bluetoothState)", "Bluetooth hazır değil: \(bluetoothState)", vi: "Bluetooth chưa sẵn sàng: \(bluetoothState)"))
             return
         }
         devices.removeAll()
         findSystemConnected()
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         isScanning = true
-        append(.info, L("Scanning for nearby devices (15 s)…", "Çevredeki cihazlar taranıyor (15 sn)…"))
+        append(.info, L("Scanning for nearby devices (15 s)…", "Çevredeki cihazlar taranıyor (15 sn)…", vi: "Đang quét thiết bị lân cận (15 giây)…"))
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))
             self?.stopScan()
@@ -269,7 +282,7 @@ final class WatchLink: NSObject, ObservableObject {
         guard isScanning else { return }
         central.stopScan()
         isScanning = false
-        append(.info, L("Scan finished: \(devices.count) devices, \(devices.filter(\.looksHuawei).count) look like Huawei", "Tarama bitti: \(devices.count) cihaz, \(devices.filter(\.looksHuawei).count) tanesi Huawei gibi görünüyor"))
+        append(.info, L("Scan finished: \(devices.count) devices, \(devices.filter(\.looksHuawei).count) look like Huawei", "Tarama bitti: \(devices.count) cihaz, \(devices.filter(\.looksHuawei).count) tanesi Huawei gibi görünüyor", vi: "Quét xong: \(devices.count) thiết bị, \(devices.filter(\.looksHuawei).count) thiết bị Huawei"))
     }
 
     // A watch connected to Huawei Health may not advertise; also ask for devices already connected to the system
@@ -279,7 +292,7 @@ final class WatchLink: NSObject, ObservableObject {
         for p in peripherals {
             upsert(p, name: p.name, rssi: nil, systemConnected: true, advertisesHuawei: false)
         }
-        append(.info, L("Found \(peripherals.count) devices already connected to the phone", "Telefona zaten bağlı \(peripherals.count) cihaz bulundu"))
+        append(.info, L("Found \(peripherals.count) devices already connected to the phone", "Telefona zaten bağlı \(peripherals.count) cihaz bulundu", vi: "Tìm thấy \(peripherals.count) thiết bị đang kết nối với iPhone"))
     }
 
     private func upsert(_ p: CBPeripheral, name: String?, rssi: Int?, systemConnected: Bool, advertisesHuawei: Bool) {
@@ -294,10 +307,10 @@ final class WatchLink: NSObject, ObservableObject {
         } else {
             // Nameless devices clutter the list; keep only connected ones
             guard resolvedName != nil || systemConnected || looksHuawei else { return }
-            devices.append(FoundDevice(id: p.identifier, peripheral: p, name: resolvedName ?? L("Unnamed device", "İsimsiz cihaz"),
+            devices.append(FoundDevice(id: p.identifier, peripheral: p, name: resolvedName ?? L("Unnamed device", "İsimsiz cihaz", vi: "Thiết bị không tên"),
                                        rssi: rssi, systemConnected: systemConnected, looksHuawei: looksHuawei))
             if looksHuawei {
-                append(.success, L("Found a Huawei device: ", "Huawei cihaz bulundu: ") + (resolvedName ?? p.identifier.uuidString))
+                append(.success, L("Found a Huawei device: ", "Huawei cihaz bulundu: ", vi: "Tìm thấy thiết bị Huawei: ") + (resolvedName ?? p.identifier.uuidString))
             }
         }
         devices.sort { ($0.looksHuawei ? 0 : 1, -($0.rssi ?? -200)) < ($1.looksHuawei ? 0 : 1, -($1.rssi ?? -200)) }
@@ -310,6 +323,8 @@ final class WatchLink: NSObject, ObservableObject {
         if let previous = retryDevice, previous.id != device.id {
             refreshLitePINOnConnect = false
             canRefreshLitePIN = false
+            navigationPeer = nil
+            navigationPeerWatchID = nil
         }
         retryDevice = device
         connectionIssue = nil
@@ -325,7 +340,7 @@ final class WatchLink: NSObject, ObservableObject {
         beginConnection(device)
     }
 
-    private func beginConnection(_ device: FoundDevice) {
+    private func beginConnection(_ device: FoundDevice, withTimeout: Bool = true) {
         resetConnectionState()
         pendingDevice = nil
         retryDevice = device
@@ -334,8 +349,9 @@ final class WatchLink: NSObject, ObservableObject {
         isConnecting = true
         wantsConnection = true
         UserDefaults.standard.set(device.id.uuidString, forKey: Self.lastWatchKey)
-        append(.info, L("Connecting to \(device.name)…", "\(device.name) cihazına bağlanılıyor…"))
+        append(.info, L("Connecting to \(device.name)…", "\(device.name) cihazına bağlanılıyor…", vi: "Đang kết nối tới \(device.name)…"))
         central.connect(device.peripheral)
+        guard withTimeout else { return }
         let attempt = connectionID
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))
@@ -347,7 +363,7 @@ final class WatchLink: NSObject, ObservableObject {
             self.connectionIssue = "Không kết nối được trong 15 giây. Để đồng hồ gần iPhone và đóng Huawei Health rồi thử lại."
             self.central.cancelPeripheralConnection(device.peripheral)
             self.isConnecting = false
-            self.append(.error, L("Could not connect within 15 s. Is the watch nearby and awake?", "15 saniyede bağlanamadı. Saat yakında ve açık mı?"))
+            self.append(.error, L("Could not connect within 15 s. Is the watch nearby and awake?", "15 saniyede bağlanamadı. Saat yakında ve açık mı?", vi: "Không kết nối được trong 15 giây. Hãy để đồng hồ ở gần và bật sáng màn hình."))
         }
     }
 
@@ -411,7 +427,7 @@ final class WatchLink: NSObject, ObservableObject {
         if let restored = peripheral, wantsConnection, !huaweiChannelReady, !isConnecting {
             if restored.state == .connected {
                 connectedName = restored.name
-                append(.info, L("Still connected to \(restored.name ?? "the watch"), setting up the channel again…", "\(restored.name ?? "Saat") ile bağlantı sürüyor, kanal yeniden kuruluyor…"))
+                append(.info, L("Still connected to \(restored.name ?? "the watch"), setting up the channel again…", "\(restored.name ?? "Saat") ile bağlantı sürüyor, kanal yeniden kuruluyor…", vi: "Vẫn đang nối với \(restored.name ?? "đồng hồ"), đang thiết lập lại kênh…"))
                 restored.discoverServices(nil)
             } else {
                 isConnecting = true
@@ -428,12 +444,13 @@ final class WatchLink: NSObject, ObservableObject {
                                   systemConnected: known.state == .connected, looksHuawei: true)
         wantsConnection = true
         isConnecting = true
-        append(.info, L("Reconnecting to the last watch: ", "Son saate otomatik bağlanılıyor: ") + (known.name ?? "watch"))
+        append(.info, L("Reconnecting to the last watch: ", "Son saate otomatik bağlanılıyor: ", vi: "Đang tự kết nối lại đồng hồ gần nhất: ") + (known.name ?? "watch"))
         // No timeout: iOS connects as soon as the watch is in range
         central.connect(known)
     }
 
     private func resetConnectionState() {
+        let currentWatchID = peripheral?.identifier
         watchUDID = nil
         identityEvidence = WatchIdentityEvidence()
         connectionID = UUID()
@@ -442,7 +459,7 @@ final class WatchLink: NSObject, ObservableObject {
         commandTask?.cancel(); commandTask = nil
         busy = nil
         writeQueue.reset()
-        routeNavigator.deliveryFailed("Mất kết nối Bluetooth. Kết nối lại và bắt đầu tuyến từ vị trí hiện tại.")
+        watchDeliveryPolicy.connectionLost()
         routeDeliveryGeneration &+= 1
         routeDelivery?.cancel(); routeDelivery = nil
         if busy == "Sending route guidance" { busy = nil }
@@ -457,8 +474,13 @@ final class WatchLink: NSObject, ObservableObject {
         faceConfirms.removeAll()
         connectedName = nil
         battery = nil
-        navigationStatus = "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
-        navigationPeer = nil
+        navigationStatus = routeNavigator.isNavigating
+            ? "Mất kết nối đồng hồ — đang tự kết nối lại, dẫn đường vẫn chạy trên iPhone."
+            : "Mở Navigation trên đồng hồ để nhận chỉ dẫn."
+        if let currentWatchID, navigationPeerWatchID != nil, navigationPeerWatchID != currentWatchID {
+            navigationPeer = nil
+            navigationPeerWatchID = nil
+        }
         navigationIsOpen = false
         watchInfo = []
         servicesAwaitingCharacteristics = 0
@@ -469,8 +491,22 @@ final class WatchLink: NSObject, ObservableObject {
     // MARK: - Watch commands
 
     func startRouteNavigation() {
-        guard isPaired, !commandsLocked else { return }
+        guard !routeNavigator.isNavigating, busy == nil else { return }
+        watchDeliveryPolicy.reset()
+        if !isPaired {
+            navigationStatus = isConnecting
+                ? "Đang kết nối đồng hồ — sẽ tự gửi chỉ dẫn khi kết nối xong."
+                : "Chưa kết nối đồng hồ — đang dẫn đường trên iPhone."
+        }
         routeNavigator.start()
+    }
+
+    func resendWatchGuidance() {
+        guard isPaired, routeNavigator.isNavigating else { return }
+        watchDeliveryPolicy.reset()
+        navigationIsOpen = false
+        navigationStatus = "Đang gửi lại chỉ dẫn lên đồng hồ…"
+        routeNavigator.resendCurrentGuidance()
     }
 
     func testTurnHaptic(_ turn: PineNavigationWire.Turn) {
@@ -483,17 +519,26 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     private func queueRouteGuidance(_ data: [UInt8], isAlert: Bool = false) {
+        routeOutbox.enqueue(data,isAlert: isAlert)
         guard isPaired else {
-            routeNavigator.deliveryFailed("Chưa kết nối với đồng hồ.")
+            navigationStatus = isConnecting
+                ? "Đang kết nối lại đồng hồ để gửi tiếp chỉ dẫn…"
+                : "Chưa kết nối đồng hồ — chỉ dẫn vẫn cập nhật trên iPhone."
             return
         }
-        routeOutbox.enqueue(data,isAlert: isAlert)
+        guard watchDeliveryPolicy.canAttempt(isPaired: isPaired, now: ProcessInfo.processInfo.systemUptime) else {
+            if watchDeliveryPolicy.watchAppClosed {
+                navigationStatus = "Navigation đã đóng trên đồng hồ. Mở lại trên đồng hồ hoặc bấm Gửi lại."
+            }
+            return
+        }
         drainRouteMessages()
     }
 
     private func queueRouteStop() {
         routeContentGeneration &+= 1
         routeOutbox.clear()
+        watchDeliveryPolicy.reset()
         guard isPaired else { return }
         routeOutbox.stop()
         drainRouteMessages()
@@ -505,7 +550,7 @@ final class WatchLink: NSObject, ObservableObject {
         var backgroundID: UIBackgroundTaskIdentifier = .invalid
         backgroundID = UIApplication.shared.beginBackgroundTask(withName: "Navigation delivery") { [weak self] in
             self?.routeDelivery?.cancel()
-            self?.routeNavigator.deliveryFailed("iOS đã hết thời gian gửi. Mở lại ứng dụng để tiếp tục.")
+            self?.navigationStatus = "Tạm hoãn gửi nền; sẽ tự gửi tiếp ở nhịp GPS kế tiếp."
             if backgroundID != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundID)
                 backgroundID = .invalid
@@ -529,6 +574,9 @@ final class WatchLink: NSObject, ObservableObject {
                     do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                 }
                 guard !Task.isCancelled, self.routeDeliveryGeneration == generation, self.isPaired else { return }
+                if !self.watchDeliveryPolicy.canAttempt(isPaired: self.isPaired, now: ProcessInfo.processInfo.systemUptime) {
+                    return
+                }
                 guard let packet = self.routeOutbox.next() else { continue }
                 let stopping = packet.isStop, data = packet.data
                 let contentGeneration = self.routeContentGeneration
@@ -544,13 +592,15 @@ final class WatchLink: NSObject, ObservableObject {
                     }
                     try await self.navigationSend(data, session: self.session, label: stopping ? "route stop" : "route guidance")
                     guard !Task.isCancelled, self.routeDeliveryGeneration == generation else { return }
+                    self.watchDeliveryPolicy.succeeded()
                     self.navigationStatus = stopping ? "Đã gửi lệnh dừng điều hướng." : "Đồng hồ đã xác nhận nhận chỉ dẫn."
                 } catch {
                     guard self.routeDeliveryGeneration == generation else { return }
+                    self.navigationIsOpen = false
+                    self.watchDeliveryPolicy.failed(now: ProcessInfo.processInfo.systemUptime)
                     self.routeOutbox.clear()
-                    self.navigationStatus = "Gửi chỉ dẫn thất bại: \(error)"
-                    self.append(.error, self.navigationStatus)
-                    self.routeNavigator.deliveryFailed(String(describing: error))
+                    self.navigationStatus = "Chưa gửi được tới đồng hồ (mở Navigation trên đồng hồ); sẽ tự thử lại."
+                    self.append(.error, "Navigation delivery retry scheduled: \(error)")
                 }
                 if self.busy == label { self.busy = nil }
             }
@@ -576,7 +626,7 @@ final class WatchLink: NSObject, ObservableObject {
         guard !isPaired, huaweiChannelReady, peripheral?.state == .connected, let watchKey else { return }
         let attempt = connectionID
         let refreshPIN = refreshLitePINOnConnect
-        run(L("Pairing…", "Eşleşiyor…")) { session in
+        run(L("Pairing…", "Eşleşiyor…", vi: "Đang ghép nối…")) { session in
             do {
                 try await session.pair(watch: watchKey, refreshLitePIN: refreshPIN)
             } catch {
@@ -601,6 +651,7 @@ final class WatchLink: NSObject, ObservableObject {
             self.connectionIssue = nil
             self.canRefreshLitePIN = false
             self.refreshLitePINOnConnect = false
+            self.watchDeliveryPolicy.reset()
 
             // Off by default: on a GT 3 SE set up with Huawei Health, the account message made the watch ask for a
             // factory reset ("phone and watch accounts don't match"). Newer watches (Watch Fit 4 Pro) need it.
@@ -610,20 +661,21 @@ final class WatchLink: NSObject, ObservableObject {
                 let setup = await session.completeSetup(watchName: self.connectedName ?? "", accountId: Self.huaweiAccountId)
                 try Task.checkCancellation()
                 guard self.connectionID == attempt else { return }
-                if !setup.sent.isEmpty { self.append(.success, L("Setup sent: ", "Kurulum gönderildi: ") + setup.sent.joined(separator: ", ")) }
-                if !setup.skipped.isEmpty { self.append(.info, L("Not asked for by the watch: ", "Saatin istemediği: ") + setup.skipped.joined(separator: ", ")) }
+                if !setup.sent.isEmpty { self.append(.success, L("Setup sent: ", "Kurulum gönderildi: ", vi: "Đã gửi thiết lập: ") + setup.sent.joined(separator: ", ")) }
+                if !setup.skipped.isEmpty { self.append(.info, L("Not asked for by the watch: ", "Saatin istemediği: ", vi: "Đồng hồ không yêu cầu: ") + setup.skipped.joined(separator: ", ")) }
                 if setup.failed.isEmpty {
                     self.pairingStage = .paired
                     self.append(.success, L("PAIRED: HiChain finished and the watch accepted the setup. Check that the watch shows no error.",
-                                            "EŞLEŞTİ: HiChain bitti ve saat kurulumu kabul etti. Saatte hata çıkmadığını kontrol et."))
+                                            "EŞLEŞTİ: HiChain bitti ve saat kurulumu kabul etti. Saatte hata çıkmadığını kontrol et.",
+                                            vi: "ĐÃ GHÉP NỐI: HiChain hoàn tất và đồng hồ đã nhận thiết lập."))
                 } else {
                     let why = setup.failed.joined(separator: ", ")
                     self.pairingStage = .setupIncomplete(why)
-                    self.append(.error, L("Setup not accepted by the watch: ", "Saat kurulumu kabul etmedi: ") + why)
+                    self.append(.error, L("Setup not accepted by the watch: ", "Saat kurulumu kabul etmedi: ", vi: "Đồng hồ không nhận thiết lập: ") + why)
                 }
             } else {
                 self.pairingStage = .paired
-                self.append(.success, L("PAIRED! The connection to the watch is now encrypted.", "EŞLEŞME TAMAM! Artık saatle şifreli konuşuyoruz."))
+                self.append(.success, L("PAIRED! The connection to the watch is now encrypted.", "EŞLEŞME TAMAM! Artık saatle şifreli konuşuyoruz.", vi: "ĐÃ GHÉP NỐI! Kết nối tới đồng hồ đã được mã hóa."))
             }
             self.watchUDID = session.watchUDID
             if let udid = session.watchUDID { self.addSecret(udid) }
@@ -639,6 +691,10 @@ final class WatchLink: NSObject, ObservableObject {
                 }
             }
             self.features.forEach { $0.watchPaired() }
+            if self.routeNavigator.isNavigating {
+                self.navigationStatus = "Đã kết nối lại đồng hồ — đang đồng bộ chỉ dẫn hiện tại…"
+                self.routeNavigator.resendCurrentGuidance()
+            }
             try await self.refreshInfo(session)
             if !session.isLitePairing { Task { await self.offerNotificationIcon(session) } }
         }
@@ -699,7 +755,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     func refresh() {
-        run(L("Reading…", "Okunuyor…")) { session in try await self.refreshInfo(session) }
+        run(L("Reading…", "Okunuyor…", vi: "Đang đọc thông tin…")) { session in try await self.refreshInfo(session) }
     }
 
     // Only repeats the existing read-only AppPlatform query. Never renegotiates
@@ -714,18 +770,20 @@ final class WatchLink: NSObject, ObservableObject {
     func sendMessage(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        run(L("Sending…", "Gönderiliyor…")) { session in
+        run(L("Sending…", "Gönderiliyor…", vi: "Đang gửi…")) { session in
             try await session.sendNotification(title: AppInfo.displayName, text: text)
-            self.append(.success, L("Sent to the watch: \"\(text)\"", "Mesaj saate gönderildi: \"\(text)\""))
+            self.append(.success, L("Sent to the watch: \"\(text)\"", "Mesaj saate gönderildi: \"\(text)\"", vi: "Đã gửi tới đồng hồ: \"\(text)\""))
         }
     }
 
     func forgetPairing() {
         guard let watchKey else { return }
         session.forget(watch: watchKey)
+        navigationPeer = nil
+        navigationPeerWatchID = nil
         isPaired = false
         pairingStage = huaweiChannelReady ? .channelReady : .none
-        append(.info, L("Saved pairing removed. The next pairing starts from the PIN step.", "Kayıtlı eşleşme silindi. Tekrar eşleşince PIN adımından başlanacak."))
+        append(.info, L("Saved pairing removed. The next pairing starts from the PIN step.", "Kayıtlı eşleşme silindi. Tekrar eşleşince PIN adımından başlanacak.", vi: "Đã xóa khóa ghép nối đã lưu. Lần kết nối sau sẽ bắt đầu từ bước nhập PIN."))
         objectWillChange.send()
     }
 
@@ -1268,12 +1326,12 @@ extension WatchLink: WatchFeatureHost {
 extension WatchLink: @preconcurrency CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
-        case .poweredOn: bluetoothState = L("On", "Açık")
-        case .poweredOff: bluetoothState = L("Off", "Kapalı")
-        case .unauthorized: bluetoothState = L("Not allowed (Settings > this app > Bluetooth)", "İzin verilmedi (Ayarlar > bu uygulama > Bluetooth)")
-        case .unsupported: bluetoothState = L("Not supported", "Desteklenmiyor")
-        case .resetting: bluetoothState = L("Restarting", "Yeniden başlatılıyor")
-        default: bluetoothState = L("Unknown", "Bilinmiyor")
+        case .poweredOn: bluetoothState = L("On", "Açık", vi: "Đang bật")
+        case .poweredOff: bluetoothState = L("Off", "Kapalı", vi: "Đang tắt")
+        case .unauthorized: bluetoothState = L("Not allowed (Settings > this app > Bluetooth)", "İzin verilmedi (Ayarlar > bu uygulama > Bluetooth)", vi: "Chưa cấp quyền (Cài đặt > ứng dụng này > Bluetooth)")
+        case .unsupported: bluetoothState = L("Not supported", "Desteklenmiyor", vi: "Không hỗ trợ")
+        case .resetting: bluetoothState = L("Restarting", "Yeniden başlatılıyor", vi: "Đang khởi động lại")
+        default: bluetoothState = L("Unknown", "Bilinmiyor", vi: "Không xác định")
         }
         append(.info, "Bluetooth: \(bluetoothState)")
         if central.state == .poweredOn { reconnectLastWatch() }
@@ -1286,7 +1344,7 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
                                   systemConnected: restored.state == .connected, looksHuawei: true)
         restored.delegate = self
         wantsConnection = true
-        append(.info, L("iOS relaunched the app in the background for the watch", "iOS uygulamayı saat için arka planda yeniden açtı"))
+        append(.info, L("iOS relaunched the app in the background for the watch", "iOS uygulamayı saat için arka planda yeniden açtı", vi: "iOS đã đánh thức ứng dụng trong nền cho đồng hồ"))
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
@@ -1303,9 +1361,9 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
             return
         }
         isConnecting = false
-        let name = peripheral.name ?? L("Unnamed device", "İsimsiz cihaz")
+        let name = peripheral.name ?? L("Unnamed device", "İsimsiz cihaz", vi: "Thiết bị không tên")
         connectedName = name
-        append(.success, L("Connected: \(name). Discovering services…", "Bağlandı: \(name). Servisler aranıyor…"))
+        append(.success, L("Connected: \(name). Discovering services…", "Bağlandı: \(name). Servisler aranıyor…", vi: "Đã kết nối: \(name). Đang tìm dịch vụ…"))
         peripheral.discoverServices(nil)
     }
 
@@ -1321,12 +1379,12 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
         wantsConnection = false
         UserDefaults.standard.removeObject(forKey: Self.lastWatchKey)
         connectionIssue = error?.localizedDescription ?? "Không kết nối được Bluetooth. Đóng Huawei Health rồi thử lại."
-        append(.error, L("Could not connect: ", "Bağlanamadı: ") + (error?.localizedDescription ?? L("unknown error", "bilinmeyen hata")))
+        append(.error, L("Could not connect: ", "Bağlanamadı: ", vi: "Không kết nối được: ") + (error?.localizedDescription ?? L("unknown error", "bilinmeyen hata", vi: "lỗi không rõ")))
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral === self.peripheral else { return }
-        let reconnect = wantsConnection && isPaired
+        let reconnect = wantsConnection && (isPaired || (routeNavigator.isNavigating && hasSavedPairing))
         let wasPairing = ![PairingStage.none, .channelReady].contains(pairingStage)
         resetConnectionState()
         self.peripheral = nil
@@ -1338,14 +1396,15 @@ extension WatchLink: @preconcurrency CBCentralManagerDelegate {
         if let issue = connectionIssue { pairingStage = .failed(String(issue.prefix(120))) }
         else if wasPairing { pairingStage = .connectionLost }
         if let error {
-            append(.error, L("Connection lost: ", "Bağlantı koptu: ") + error.localizedDescription)
+            append(.error, L("Connection lost: ", "Bağlantı koptu: ", vi: "Mất kết nối: ") + error.localizedDescription)
         } else {
-            append(.info, L("Disconnected", "Bağlantı kesildi"))
+            append(.info, L("Disconnected", "Bağlantı kesildi", vi: "Đã ngắt kết nối"))
         }
         if reconnect {
-            append(.info, L("Trying to reconnect…", "Yeniden bağlanmaya çalışılıyor…"))
+            append(.info, L("Trying to reconnect…", "Yeniden bağlanmaya çalışılıyor…", vi: "Đang tự động kết nối lại…"))
             beginConnection(FoundDevice(id: peripheral.identifier, peripheral: peripheral,
-                                       name: peripheral.name ?? "Đồng hồ", systemConnected: false, looksHuawei: true))
+                                       name: peripheral.name ?? "Đồng hồ", systemConnected: false, looksHuawei: true),
+                            withTimeout: false)
         } else {
             if wantsConnection {
                 connectionIssue = "Mất kết nối trong lúc xác thực. Đóng Huawei Health và bấm Kết nối lại."

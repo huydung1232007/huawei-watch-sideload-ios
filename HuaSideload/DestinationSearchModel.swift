@@ -15,6 +15,8 @@ final class DestinationSearchModel: NSObject, ObservableObject, MKLocalSearchCom
     @Published private(set) var results: [RouteNavigator.Destination] = []
     @Published private(set) var selected: SelectedMapPin?
     @Published private(set) var message = ""
+    @Published private(set) var recentQueries: [String] = UserDefaults.standard.stringArray(forKey: Self.recentStorageKey) ?? []
+    private static let recentStorageKey = "recentDestinationSearchesV1"
     private var revision = UUID()
     private var debounce: Task<Void,Never>?
     private var requestTask: Task<Void,Never>?
@@ -77,6 +79,7 @@ final class DestinationSearchModel: NSObject, ObservableObject, MKLocalSearchCom
     func submit(_ text: String, region: MKCoordinateRegion?) {
         let query = String(text.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200))
         guard !query.isEmpty else { edit("",region:region); return }
+        saveRecent(query)
         let request = MKLocalSearch.Request(); request.naturalLanguageQuery = query
         if let region { request.region = region }
         run(request,resolveSelection:false)
@@ -84,9 +87,27 @@ final class DestinationSearchModel: NSObject, ObservableObject, MKLocalSearchCom
 
     func resolve(_ item: Suggestion, region: MKCoordinateRegion?) {
         guard let completion = item.completion else { return }
+        saveRecent(item.title)
         let request = MKLocalSearch.Request(completion:completion)
         if let region { request.region = region }
         run(request,resolveSelection:true)
+    }
+
+    func saveRecent(_ text: String) {
+        let next = RecentSearchQueries.record(text, into: recentQueries)
+        guard next != recentQueries else { return }
+        recentQueries = next
+        UserDefaults.standard.set(next, forKey: Self.recentStorageKey)
+    }
+
+    func removeRecent(_ text: String) {
+        recentQueries.removeAll { $0 == text }
+        UserDefaults.standard.set(recentQueries, forKey: Self.recentStorageKey)
+    }
+
+    func clearRecents() {
+        recentQueries = []
+        UserDefaults.standard.removeObject(forKey: Self.recentStorageKey)
     }
 
     private func run(_ request: MKLocalSearch.Request,resolveSelection: Bool) {

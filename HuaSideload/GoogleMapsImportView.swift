@@ -25,7 +25,9 @@ struct GoogleMapsImportView: View {
 
     var body: some View {
         Group {
-            if let pin { MapPinDestinationView(pin:pin,navigator:navigator,favorites:favorites) }
+            if let pin {
+                MapPinDestinationView(pin:pin,navigator:navigator,favorites:favorites,onBack:{ self.pin = nil })
+            }
             else { entryForm }
         }
         .onDisappear { cancel() }
@@ -79,12 +81,19 @@ struct GoogleMapsImportView: View {
                 if !results.isEmpty {
                     Section("Chọn đúng địa điểm") {
                         ForEach(results) { place in
+                            let badge = navigator.distanceBadge(to: place.item.placemark.coordinate)
                             Button {
                                 showPin(place.item.placemark.coordinate,name:place.name)
                             } label: {
-                                VStack(alignment:.leading,spacing:4) {
-                                    Text(place.name).font(.headline).foregroundStyle(.primary)
-                                    Text(place.address).font(.caption).foregroundStyle(.secondary)
+                                HStack(spacing: 8) {
+                                    VStack(alignment:.leading,spacing:4) {
+                                        Text(place.name).font(.headline).foregroundStyle(.primary)
+                                        Text(place.address).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 4)
+                                    if let badge {
+                                        Text(badge).font(.caption.weight(.semibold)).foregroundStyle(.blue)
+                                    }
                                 }.padding(.vertical,4)
                             }.accessibilityIdentifier("place-link-search-result")
                         }
@@ -123,6 +132,7 @@ struct GoogleMapsImportView: View {
                     showPin(.init(latitude:point.latitude,longitude:point.longitude),name:name)
                 case let .search(query):
                     let request = MKLocalSearch.Request(); request.naturalLanguageQuery = query
+                    if let region = navigator.destinationSearchRegion { request.region = region }
                     let search = MKLocalSearch(request:request); self.search = search
                     let response = try await search.start()
                     try Task.checkCancellation()

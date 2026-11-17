@@ -16,6 +16,7 @@ enum RideFormat {
 
 struct TripHistoryView: View {
     @ObservedObject var history: TripHistoryStore
+    var onRepeatTrip: ((String) -> Void)? = nil
     @State private var confirmingClear = false
     var body: some View {
         NavigationStack {
@@ -38,7 +39,7 @@ struct TripHistoryView: View {
                     Section("Gần đây") {
                         ForEach(history.records) { trip in
                             NavigationLink {
-                                TripDetailView(trip: trip)
+                                TripDetailView(trip: trip, onRepeatTrip: onRepeatTrip)
                             } label: {
                                 HStack(alignment: .top,spacing: 12) {
                                     Image(systemName: trip.mode == "Xe máy" ? "motorcycle" : (trip.mode == "Đi bộ" ? "figure.walk" : "car.fill"))
@@ -53,10 +54,15 @@ struct TripHistoryView: View {
                                     }
                                 }.padding(.vertical,5)
                             }
-                            .swipeActions { Button("Xóa",role: .destructive) { history.delete(trip.id) } }
+                            .swipeActions {
+                                Button("Xóa",role: .destructive) { history.delete(trip.id) }
+                                if let onRepeatTrip {
+                                    Button("Đi lại") { onRepeatTrip(trip.destination) }.tint(.blue)
+                                }
+                            }
                         }
                     }
-                    Section { Text("Quãng đường và tốc độ là ước lượng từ GPS. Không lưu tọa độ hay đường đi chi tiết. Phiên bị gián đoạn được lưu đến mốc gần nhất.").font(.footnote).foregroundStyle(.secondary) }
+                    Section { Text("Quãng đường và tốc độ là ước lượng từ GPS. Không lưu tọa độ hay đường đi chi tiết. Vuốt sang trái hoặc mở chi tiết để tìm đường đi lại.").font(.footnote).foregroundStyle(.secondary) }
                 }
             }
             .navigationTitle("Lịch sử")
@@ -77,12 +83,23 @@ struct TripHistoryView: View {
 
 private struct TripDetailView: View {
     let trip: TripRecord
+    var onRepeatTrip: ((String) -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
         List {
             Section {
                 Text(trip.destination).font(.title2.bold())
                 Label(trip.outcomeLabel,systemImage: trip.outcome == .completed ? "checkmark.circle.fill" : "pause.circle")
                     .foregroundStyle(.secondary)
+                if let onRepeatTrip {
+                    Button {
+                        dismiss()
+                        onRepeatTrip(trip.destination)
+                    } label: {
+                        Label("Tìm đường đi lại nơi này", systemImage: "location.north.fill")
+                            .fontWeight(.semibold)
+                    }
+                }
             }
             Section("Thống kê hành trình") {
                 LabeledContent("Quãng đường GPS",value: RideFormat.distance(trip.distance))

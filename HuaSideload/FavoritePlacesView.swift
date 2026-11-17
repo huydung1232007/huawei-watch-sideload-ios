@@ -37,40 +37,92 @@ struct FavoritePlacesView: View {
                         ContentUnavailableView("Chưa có địa điểm",systemImage:"star",description:Text("Lưu nhà, nơi làm việc hoặc vị trí bạn đang đứng."))
                     }
                     ForEach(favorites.places) { place in
-                        Button {
-                            guard !navigator.isNavigating else { return }
-                            let item = MKMapItem(placemark:MKPlacemark(coordinate:.init(latitude:place.latitude,longitude:place.longitude)))
-                            item.name = place.name
-                            navigator.selectAndCalculate(.init(item:item)); dismiss()
-                        } label: {
-                            HStack(spacing:12) {
-                                Image(systemName:"star.fill").foregroundStyle(.orange)
-                                    .padding(10).background(Color.orange.opacity(0.1),in:RoundedRectangle(cornerRadius:12))
-                                VStack(alignment:.leading,spacing:4) {
-                                    Text(place.name).font(.headline).foregroundStyle(.primary)
-                                    Text(String(format:"%.6f, %.6f",place.latitude,place.longitude)).font(.caption).foregroundStyle(.secondary)
+                        let coord = CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
+                        let badge = navigator.distanceBadge(to: coord)
+                        HStack(spacing: 10) {
+                            Button {
+                                guard !navigator.isNavigating else { return }
+                                let item = MKMapItem(placemark:MKPlacemark(coordinate:coord))
+                                item.name = place.name
+                                navigator.selectAndCalculate(.init(item:item)); dismiss()
+                            } label: {
+                                HStack(spacing:12) {
+                                    Image(systemName:"star.fill").foregroundStyle(.orange)
+                                        .padding(10).background(Color.orange.opacity(0.1),in:RoundedRectangle(cornerRadius:12))
+                                    VStack(alignment:.leading,spacing:4) {
+                                        Text(place.name).font(.headline).foregroundStyle(.primary)
+                                        HStack(spacing: 6) {
+                                            if let badge {
+                                                Text(badge).font(.caption.weight(.semibold)).foregroundStyle(.blue)
+                                                Text("·").font(.caption).foregroundStyle(.secondary)
+                                            }
+                                            Text(String(format:"%.5f, %.5f",place.latitude,place.longitude))
+                                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                    }
+                                    Spacer(minLength: 4)
+                                    Image(systemName:"arrow.up.right").font(.caption.bold()).foregroundStyle(.blue)
+                                }.padding(.vertical,5).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(navigator.isNavigating || navigator.isCalculating)
+                            if navigator.canAddStopover {
+                                Button {
+                                    let item = MKMapItem(placemark: MKPlacemark(coordinate: coord))
+                                    item.name = place.name
+                                    navigator.addStopover(.init(item: item))
+                                    navigator.calculateWhenReady()
+                                    dismiss()
+                                } label: {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.title3)
+                                        .foregroundStyle(.purple)
+                                        .frame(width: 34, height: 34)
                                 }
-                                Spacer()
-                                Image(systemName:"arrow.up.right").font(.caption.bold()).foregroundStyle(.blue)
-                            }.padding(.vertical,5)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Thêm \(place.name) làm điểm dừng")
+                            }
                         }
-                        .disabled(navigator.isNavigating || navigator.isCalculating)
                         .swipeActions(edge:.trailing) {
                             Button("Xóa",role:.destructive) { favorites.delete(place.id) }
                             Button("Sửa tên") { editing = place }.tint(.blue)
+                            if navigator.canAddStopover {
+                                Button("Điểm dừng") {
+                                    let item = MKMapItem(placemark: MKPlacemark(coordinate: coord))
+                                    item.name = place.name
+                                    navigator.addStopover(.init(item: item))
+                                    navigator.calculateWhenReady()
+                                    dismiss()
+                                }.tint(.purple)
+                            }
                         }
                         .contextMenu {
+                            if navigator.canAddStopover {
+                                Button("Thêm làm điểm dừng",systemImage:"plus.circle") {
+                                    let item = MKMapItem(placemark: MKPlacemark(coordinate: coord))
+                                    item.name = place.name
+                                    navigator.addStopover(.init(item: item))
+                                    navigator.calculateWhenReady()
+                                    dismiss()
+                                }
+                            }
                             Button("Sửa tên",systemImage:"pencil") { editing = place }
                             Button("Xóa",systemImage:"trash",role:.destructive) { favorites.delete(place.id) }
                         }
                     }
+                    .onMove { favorites.move(fromOffsets: $0, toOffset: $1) }
                 } header: { Text("Đã lưu · \(favorites.places.count)") }
-                footer: { Text(navigator.isNavigating ? "Kết thúc chuyến hiện tại trước khi dẫn đường tới địa điểm khác. Bạn vẫn có thể lưu GPS." : "Chạm địa điểm để tính tuyến. Vuốt sang trái để sửa tên hoặc xóa.") }
+                footer: { Text(navigator.isNavigating ? "Kết thúc chuyến hiện tại trước khi dẫn đường tới địa điểm khác. Bạn vẫn có thể lưu GPS." : "Chạm địa điểm để tính tuyến; bấm dấu + để chèn làm điểm dừng; dùng Sửa để kéo đổi thứ tự.") }
                 if let message = favorites.storageMessage { Section { Text(message).font(.footnote).foregroundStyle(.red) } }
                 Section { Text("Tên và tọa độ được lưu riêng trên iPhone. Khi chọn để tính tuyến xe máy, tọa độ được gửi tới nhà cung cấp tuyến như các điểm đến khác.").font(.footnote).foregroundStyle(.secondary) }
             }
             .navigationTitle("Yêu thích").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement:.topBarTrailing) { Button("Xong") { dismiss() } } }
+            .toolbar {
+                if favorites.places.count > 1 {
+                    ToolbarItem(placement:.topBarLeading) { EditButton() }
+                }
+                ToolbarItem(placement:.topBarTrailing) { Button("Xong") { dismiss() } }
+            }
             .navigationDestination(item:$editing) { place in FavoritePlaceEditor(place:place,favorites:favorites) }
             .onChange(of:navigator.capturedFavorite) { _, place in if let place { editing = place } }
             .onDisappear { navigator.cancelFavoriteGPS() }

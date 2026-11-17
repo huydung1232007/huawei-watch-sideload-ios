@@ -116,22 +116,22 @@ enum WatchFaceCompatibility: Equatable {
 
     static func evaluate(screenCode: String, device: WatchFaceService.DeviceParams?) -> WatchFaceCompatibility {
         guard let faceScreen = WatchFaceScreen.resolutions[screenCode] else {
-            return .unknown(L("screen code \"\(screenCode)\" is not in the known list", "\"\(screenCode)\" ekran kodu bilinen listede yok"))
+            return .unknown(L("screen code \"\(screenCode)\" is not in the known list", "\"\(screenCode)\" ekran kodu bilinen listede yok", vi: "mã màn hình \"\(screenCode)\" chưa có trong danh sách"))
         }
         guard let device else {
-            return .unknown(L("made for \(faceScreen); the watch did not report its screen", "\(faceScreen) için yapılmış; saat ekranını bildirmedi"))
+            return .unknown(L("made for \(faceScreen); the watch did not report its screen", "\(faceScreen) için yapılmış; saat ekranını bildirmedi", vi: "dành cho màn hình \(faceScreen); đồng hồ chưa báo độ phân giải"))
         }
         if device.resolution == faceScreen {
-            return .compatible(L("made for \(faceScreen), the watch's screen", "\(faceScreen) için yapılmış, saatin ekranı bu"))
+            return .compatible(L("made for \(faceScreen), the watch's screen", "\(faceScreen) için yapılmış, saatin ekranı bu", vi: "đúng chuẩn màn hình \(faceScreen) của đồng hồ"))
         }
-        return .incompatible(L("made for \(faceScreen), the watch is \(device.resolution)", "\(faceScreen) için yapılmış, saat \(device.resolution)"))
+        return .incompatible(L("made for \(faceScreen), the watch is \(device.resolution)", "\(faceScreen) için yapılmış, saat \(device.resolution)", vi: "dành cho \(faceScreen), trong khi đồng hồ là \(device.resolution)"))
     }
 
     var label: String {
         switch self {
-        case .compatible(let why): return L("Compatible: ", "Uyumlu: ") + why
-        case .incompatible(let why): return L("Not for this watch: ", "Bu saate uygun değil: ") + why
-        case .unknown(let why): return L("Compatibility unknown: ", "Uyumluluk bilinmiyor: ") + why
+        case .compatible(let why): return L("Compatible: ", "Uyumlu: ", vi: "Tương thích: ") + why
+        case .incompatible(let why): return L("Not for this watch: ", "Bu saate uygun değil: ", vi: "Không khớp màn hình: ") + why
+        case .unknown(let why): return L("Compatibility unknown: ", "Uyumluluk bilinmiyor: ", vi: "Chưa rõ tương thích: ") + why
         }
     }
 
@@ -247,10 +247,10 @@ enum WatchFaceUploadMethod: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .bin: return L("A: watchface.bin, version 1.0.0 (standard)", "A: watchface.bin, sürüm 1.0.0 (standart)")
-        case .binFaceVersion: return L("B: watchface.bin, the face's version", "B: watchface.bin, kadranın sürümü")
-        case .package: return L("C: whole com.huawei.watchface, version 1.0.0", "C: tüm com.huawei.watchface, sürüm 1.0.0")
-        case .packageFaceVersion: return L("D: whole com.huawei.watchface, the face's version", "D: tüm com.huawei.watchface, kadranın sürümü")
+        case .bin: return L("A: watchface.bin, version 1.0.0 (standard)", "A: watchface.bin, sürüm 1.0.0 (standart)", vi: "A: watchface.bin, bản 1.0.0 (tiêu chuẩn LiteOS)")
+        case .binFaceVersion: return L("B: watchface.bin, the face's version", "B: watchface.bin, kadranın sürümü", vi: "B: watchface.bin, theo phiên bản gói")
+        case .package: return L("C: whole com.huawei.watchface, version 1.0.0", "C: tüm com.huawei.watchface, sürüm 1.0.0", vi: "C: trọn gói com.huawei.watchface, bản 1.0.0")
+        case .packageFaceVersion: return L("D: whole com.huawei.watchface, the face's version", "D: tüm com.huawei.watchface, kadranın sürümü", vi: "D: trọn gói com.huawei.watchface, theo phiên bản gói")
         }
     }
 

@@ -30,7 +30,10 @@ struct ContentView: View {
         TabView(selection: $tab) {
             NavigationHomeView(navigator: link.routeNavigator,link: link,connectWatch: { tab = .watch })
                 .tabItem { Label("Dẫn đường",systemImage: "location.north.fill") }.tag(Tab.navigation)
-            TripHistoryView(history: link.routeNavigator.history)
+            TripHistoryView(history: link.routeNavigator.history, onRepeatTrip: { placeName in
+                tab = .navigation
+                link.routeNavigator.repeatTripDestination(placeName)
+            })
                 .tabItem { Label("Lịch sử",systemImage: "clock.arrow.circlepath") }.tag(Tab.history)
             page("Đồng hồ") {
                 statusSection
@@ -42,10 +45,11 @@ struct ContentView: View {
                     if link.isPaired { notificationSection }
                     if link.hasSavedPairing && !filmMode {
                         Section {
-                            Button(L("Forget pairing", "Eşleşmeyi unut"), role: .destructive) { link.forgetPairing() }
+                            Button(L("Forget pairing", "Eşleşmeyi unut", vi: "Quên ghép nối"), role: .destructive) { link.forgetPairing() }
                         } footer: {
                             Text(L("Use this if the watch was reset or pairing broke. The next pairing starts from the PIN step.",
-                                   "Saat sıfırlandıysa ya da eşleşme bozulduysa kullan. Sonraki eşleşme PIN adımından başlar."))
+                                   "Saat sıfırlandıysa ya da eşleşme bozulduysa kullan. Sonraki eşleşme PIN adımından başlar.",
+                                   vi: "Dùng khi đồng hồ đã khôi phục cài đặt gốc hoặc lỗi khóa ghép nối. Lần kết nối tiếp theo sẽ bắt đầu lại từ bước nhập PIN."))
                         }
                     }
                 }
@@ -112,7 +116,7 @@ struct ContentView: View {
                     if filmModeOffered {
                         ToolbarItem(placement: .topBarLeading) {
                             Button { filmModeOn.toggle() } label: {
-                                Label(L("Filming", "Çekim"), systemImage: filmMode ? "video.fill" : "video")
+                                Label(L("Filming", "Çekim", vi: "Quay hình"), systemImage: filmMode ? "video.fill" : "video")
                                     .labelStyle(.titleAndIcon)
                             }
                             .tint(filmMode ? .red : nil)
@@ -120,13 +124,13 @@ struct ContentView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
-                            Picker(L("Language", "Dil"), selection: $language) {
+                            Picker(L("Language", "Dil", vi: "Ngôn ngữ"), selection: $language) {
                                 ForEach(AppLanguage.allCases) { Text($0.title).tag($0.rawValue) }
                             }
                         } label: {
                             Image(systemName: "globe")
                         }
-                        .accessibilityLabel(L("Language", "Dil"))
+                        .accessibilityLabel(L("Language", "Dil", vi: "Ngôn ngữ"))
                     }
                 }
         }
@@ -134,11 +138,12 @@ struct ContentView: View {
 
     private var pairFirstSection: some View {
         Section {
-            Button(L("Pair with the watch first", "Önce saatle eşleş")) { tab = .watch }
+            Button(L("Pair with the watch first", "Önce saatle eşleş", vi: "Ghép nối với đồng hồ trước")) { tab = .watch }
                 .fontWeight(.semibold)
         } footer: {
             Text(L("This needs an encrypted connection to the watch. Connect and pair on the Watch tab.",
-                   "Bunun için saatle şifreli bağlantı gerekiyor. Saat sekmesinden bağlan ve eşleş."))
+                   "Bunun için saatle şifreli bağlantı gerekiyor. Saat sekmesinden bağlan ve eşleş.",
+                   vi: "Mục này cần kết nối mã hóa với đồng hồ. Hãy kết nối và ghép nối ở tab Đồng hồ trước."))
         }
     }
 
@@ -163,9 +168,9 @@ struct ContentView: View {
             Text("Kết nối nhanh")
         } footer: {
             if link.isPaired {
-                Text("Đồng hồ đã kết nối. Nếu cần lấy PIN mới, bấm Disconnect trước.")
+                Text("Đồng hồ đã kết nối. Nếu cần lấy PIN mới, bấm Ngắt kết nối trước.")
             } else {
-                Text("Có thể bấm ngay khi đang kết nối hoặc chờ xác thực bằng PIN cũ, không cần đợi báo lỗi. Đóng Huawei Health và xác nhận trên đồng hồ nếu được hỏi. Nếu chưa chọn đồng hồ, vào Find watch trước.")
+                Text("Có thể bấm ngay khi đang kết nối hoặc chờ xác thực bằng PIN cũ, không cần đợi báo lỗi. Đóng Huawei Health và xác nhận trên đồng hồ nếu được hỏi. Nếu chưa chọn đồng hồ, bấm Tìm đồng hồ bên dưới trước.")
             }
         }
     }
@@ -173,22 +178,22 @@ struct ContentView: View {
     private var statusSection: some View {
         Section {
             if !filmMode {
-                LabeledContent(L("Bluetooth", "Bluetooth"), value: link.bluetoothState)
+                LabeledContent(L("Bluetooth", "Bluetooth", vi: "Bluetooth"), value: link.bluetoothState)
             }
-            LabeledContent(L("Watch", "Saat"), value: link.connectedName ?? (link.isConnecting ? L("Connecting…", "Bağlanıyor…") : L("Not connected", "Bağlı değil")))
-            LabeledContent(L("Pairing", "Eşleşme"), value: link.pairingStage.label)
+            LabeledContent(L("Watch", "Saat", vi: "Đồng hồ"), value: link.connectedName ?? (link.isConnecting ? L("Connecting…", "Bağlanıyor…", vi: "Đang kết nối…") : L("Not connected", "Bağlı değil", vi: "Chưa kết nối")))
+            LabeledContent(L("Pairing", "Eşleşme", vi: "Ghép nối"), value: link.pairingStage.label)
             if let battery = link.battery {
-                LabeledContent(L("Battery", "Pil"), value: "\(battery)%")
+                LabeledContent(L("Battery", "Pil", vi: "Pin"), value: "\(battery)%")
             }
             if !filmMode {
                 ForEach(link.watchInfo, id: \.self) { Text(link.display($0)).font(.callout) }
             }
         } header: {
             HStack {
-                Text(L("Status", "Durum"))
+                Text(L("Status", "Durum", vi: "Trạng thái"))
                 Spacer()
                 if !filmMode {
-                    Button(link.revealIdentity ? L("Hide identity", "Kimliği gizle") : L("Show identity", "Kimliği göster")) {
+                    Button(link.revealIdentity ? L("Hide identity", "Kimliği gizle", vi: "Ẩn định danh") : L("Show identity", "Kimliği göster", vi: "Hiện định danh")) {
                         link.revealIdentity.toggle()
                     }
                     .font(.caption)
@@ -198,23 +203,25 @@ struct ContentView: View {
         } footer: {
             if !filmMode {
                 Text(L("Serial numbers and MAC addresses are hidden on screen and in the log. \"Show identity\" reveals them.",
-                       "Seri no ve MAC adresleri ekranda ve kayıtlarda gizli tutulur. \"Kimliği göster\" ile açılır."))
+                       "Seri no ve MAC adresleri ekranda ve kayıtlarda gizli tutulur. \"Kimliği göster\" ile açılır.",
+                       vi: "Số sê-ri và địa chỉ MAC được ẩn trên màn hình và nhật ký. Bấm \"Hiện định danh\" nếu cần xem."))
             }
         }
     }
 
     private var devicesSection: some View {
         Section {
-            Button(link.isScanning ? L("Scanning…", "Aranıyor…") : L("Find watch", "Saati ara")) { link.startScan() }
+            Button(link.isScanning ? L("Scanning…", "Aranıyor…", vi: "Đang quét…") : L("Find watch", "Saati ara", vi: "Tìm đồng hồ")) { link.startScan() }
                 .disabled(link.isScanning)
             ForEach(link.devices) { device in
                 Button { link.connect(device) } label: { DeviceRow(device: device) }
             }
         } header: {
-            Text(L("Devices", "Cihazlar"))
+            Text(L("Devices", "Cihazlar", vi: "Thiết bị"))
         } footer: {
             Text(L("If the watch is connected to Huawei Health it shows up as \"connected to phone\". Tap it.",
-                   "Saat Huawei Health'e bağlıysa \"telefona bağlı\" olarak görünür. Ona dokun."))
+                   "Saat Huawei Health'e bağlıysa \"telefona bağlı\" olarak görünür. Ona dokun.",
+                   vi: "Nếu đồng hồ đang nối hệ thống với iPhone, mục đó sẽ hiện \"đang nối với iPhone\". Chạm vào để kết nối."))
         }
     }
 
@@ -225,30 +232,33 @@ struct ContentView: View {
             }
             if !link.isPaired {
                 // A first pairing (PIN + HiChain) creates this app's own pairing on the watch; a saved key only reconnects
-                Button(link.hasSavedPairing ? L("Pair (saved key)", "Eşleş (kayıtlı anahtarla)") : L("Pair", "Eşleş")) {
+                Button(link.hasSavedPairing ? L("Pair (saved key)", "Eşleş (kayıtlı anahtarla)", vi: "Ghép nối (khóa đã lưu)") : L("Pair", "Eşleş", vi: "Ghép nối")) {
                     if link.hasSavedPairing { link.pair() } else { confirmingFirstPairing = true }
                 }
                 .disabled(!link.huaweiChannelReady || link.commandsLocked)
                 .fontWeight(.semibold)
-                .confirmationDialog(L("First pairing with this watch", "Bu saatle ilk eşleşme"), isPresented: $confirmingFirstPairing, titleVisibility: .visible) {
-                    Button(L("Pair now", "Şimdi eşleş")) { link.pair() }
-                    Button(L("Cancel", "Vazgeç"), role: .cancel) {}
+                .confirmationDialog(L("First pairing with this watch", "Bu saatle ilk eşleşme", vi: "Ghép nối lần đầu với đồng hồ này"), isPresented: $confirmingFirstPairing, titleVisibility: .visible) {
+                    Button(L("Pair now", "Şimdi eşleş", vi: "Ghép nối ngay")) { link.pair() }
+                    Button(L("Cancel", "Vazgeç", vi: "Hủy"), role: .cancel) {}
                 } message: {
                     Text(sendsPairingSetup
                          ? L("This creates HuaSideload's own pairing on the watch (you confirm it on the watch), then sends the setup with the Huawei account ID above. If the watch says the accounts don't match and offers a reset, do NOT reset: close the app and turn the setup off.",
-                             "Bu, saatte HuaSideload'un kendi eşleşmesini oluşturur (saatte onaylarsın), sonra yukarıdaki Huawei hesap ID'siyle kurulumu gönderir. Saat hesapların eşleşmediğini söyleyip sıfırlamayı önerirse SIFIRLAMA: uygulamayı kapat ve kurulumu kapat.")
+                             "Bu, saatte HuaSideload'un kendi eşleşmesini oluşturur (saatte onaylarsın), sonra yukarıdaki Huawei hesap ID'siyle kurulumu gönderir. Saat hesapların eşleşmediğini söyleyip sıfırlamayı önerirse SIFIRLAMA: uygulamayı kapat ve kurulumu kapat.",
+                             vi: "Tạo phiên ghép nối riêng của HuaSideload trên đồng hồ (bạn xác nhận trên đồng hồ), sau đó gửi thiết lập kèm Huawei ID. Nếu đồng hồ báo khác tài khoản và hỏi đặt lại, TUYỆT ĐỐI KHÔNG đặt lại: hãy đóng app và tắt tùy chọn thiết lập.")
                          : L("This creates HuaSideload's own pairing on the watch (you confirm it on the watch).",
-                             "Bu, saatte HuaSideload'un kendi eşleşmesini oluşturur (saatte onaylarsın)."))
+                             "Bu, saatte HuaSideload'un kendi eşleşmesini oluşturur (saatte onaylarsın).",
+                             vi: "Tạo phiên ghép nối riêng của HuaSideload trên đồng hồ (xác nhận mã trên đồng hồ khi được hỏi)."))
                 }
                 if !filmMode {
-                    Toggle(L("Send setup after pairing (newer watches)", "Eşleşmeden sonra kurulum gönder (yeni saatler)"), isOn: $sendsPairingSetup)
+                    Toggle(L("Send setup after pairing (newer watches)", "Eşleşmeden sonra kurulum gönder (yeni saatler)", vi: "Gửi thiết lập sau ghép nối (đồng hồ đời mới)"), isOn: $sendsPairingSetup)
                     if sendsPairingSetup {
                         Label(L("For a watch set up without Huawei Health (new or factory-reset: this sets it up, tested on a GT 3 SE) and for watches that report \"Pairing failed\" without it (e.g. Watch Fit 4 Pro). It tells the watch which Huawei account it belongs to: on a watch set up with Huawei Health, an empty or wrong account ID makes the watch say \"phone and watch accounts don't match\" and offer a factory reset. Never tap Reset on the watch; close the app and turn this off.",
-                                "Huawei Health olmadan kurulan saat için (yeni ya da sıfırlanmış: saati bununla kurar, GT 3 SE'de denendi) ve bu olmadan \"Eşleşme başarısız\" diyen saatler için (ör. Watch Fit 4 Pro). Saate hangi Huawei hesabına ait olduğunu söyler: Huawei Health ile kurulmuş saatte boş ya da yanlış hesap ID'si saate \"telefon ve saat hesapları eşleşmiyor\" dedirtir ve fabrika ayarlarına sıfırlamayı önerir. Saatte asla Sıfırla'ya basma; uygulamayı kapat ve bunu kapat."),
+                                "Huawei Health olmadan kurulan saat için (yeni ya da sıfırlanmış: saati bununla kurar, GT 3 SE'de denendi) ve bu olmadan \"Eşleşme başarısız\" diyen saatler için (ör. Watch Fit 4 Pro). Saate hangi Huawei hesabına ait olduğunu söyler: Huawei Health ile kurulmuş saatte boş ya da yanlış hesap ID'si saate \"telefon ve saat hesapları eşleşmiyor\" dedirtir ve fabrika ayarlarına sıfırlamayı önerir. Saatte asla Sıfırla'ya basma; uygulamayı kapat ve bunu kapat.",
+                                vi: "Chỉ dành cho đồng hồ đời mới (như GT 3 SE / Fit 4 Pro). Với GT 2 Pro đã ghép Huawei Health, hãy TẮT mục này; không bao giờ bấm Đặt lại (Reset) trên đồng hồ."),
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote)
                             .foregroundStyle(.red)
-                        SecureField(L("Huawei account ID (empty: no account)", "Huawei hesap ID'si (boş: hesap yok)"), text: $huaweiAccountId)
+                        SecureField(L("Huawei account ID (empty: no account)", "Huawei hesap ID'si (boş: hesap yok)", vi: "Huawei Account ID (để trống nếu không có)"), text: $huaweiAccountId)
                             .keyboardType(.numberPad)
                             .onChange(of: huaweiAccountId) { _, value in
                                 CredentialStore.shared.set(value.trimmingCharacters(in: .whitespacesAndNewlines), for: CredentialStore.huaweiAccountKey)
@@ -256,18 +266,19 @@ struct ContentView: View {
                     }
                 }
             } else if !filmMode {
-                Button(L("Refresh battery and watch info", "Pil ve saat bilgisini yenile")) { link.refresh() }
+                Button(L("Refresh battery and watch info", "Pil ve saat bilgisini yenile", vi: "Làm mới pin và thông tin đồng hồ")) { link.refresh() }
                     .disabled(link.commandsLocked)
             }
-            Button(L("Disconnect (release for Huawei Health)", "Bağlantıyı kes (Huawei Health'e bırak)"), role: .destructive) { link.disconnect() }
+            Button(L("Disconnect (release for Huawei Health)", "Bağlantıyı kes (Huawei Health'e bırak)", vi: "Ngắt kết nối (nhường cho Huawei Health)"), role: .destructive) { link.disconnect() }
         } header: {
-            Text(L("Watch", "Saat"))
+            Text(L("Watch", "Saat", vi: "Đồng hồ"))
         } footer: {
             if link.isPaired && !filmMode {
                 Text(L("To go back to Huawei Health: tap Disconnect, then open Huawei Health. Disconnecting keeps the watch's data, its Huawei Health pairing and HuaSideload's saved key; it is not Forget pairing and not a reset.",
-                       "Huawei Health'e dönmek için: Bağlantıyı kes'e dokun, sonra Huawei Health'i aç. Bağlantıyı kesmek saatin verilerini, Huawei Health eşleşmesini ve HuaSideload'un kayıtlı anahtarını korur; eşleşmeyi unutmak ya da sıfırlamak değildir."))
+                       "Huawei Health'e dönmek için: Bağlantıyı kes'e dokun, sonra Huawei Health'i aç. Bağlantıyı kesmek saatin verilerini, Huawei Health eşleşmesini ve HuaSideload'un kayıtlı anahtarını korur; eşleşmeyi unutmak ya da sıfırlamak değildir.",
+                       vi: "Để dùng lại Huawei Health: bấm Ngắt kết nối rồi mở Huawei Health. Ngắt kết nối vẫn giữ nguyên dữ liệu đồng hồ và khóa đã lưu của HuaSideload."))
             } else if !link.isPaired && !link.hasSavedPairing && !filmMode {
-                Text("Đóng hẳn Huawei Health trước khi kết nối. Đồng hồ có thể yêu cầu xác nhận. Với GT 2 Pro, giữ Send setup after pairing tắt; không reset đồng hồ để xử lý lỗi kết nối.")
+                Text("Đóng hẳn Huawei Health trước khi kết nối. Đồng hồ có thể yêu cầu xác nhận. Với GT 2 Pro, giữ Gửi thiết lập sau ghép nối tắt; không reset đồng hồ để xử lý lỗi kết nối.")
             }
         }
     }
@@ -281,7 +292,7 @@ struct ContentView: View {
     private var watchAppsSection: some View {
         Section {
             if let progress = link.watchAppProgress {
-                ProgressView(value: progress) { Text(L("Uploading… \(Int(progress * 100))%", "Yükleniyor… %\(Int(progress * 100))")) }
+                ProgressView(value: progress) { Text(L("Uploading… \(Int(progress * 100))%", "Yükleniyor… %\(Int(progress * 100))", vi: "Đang tải lên… \(Int(progress * 100))%")) }
             }
             if let status = link.appInstallStatus, link.watchAppProgress == nil {
                 Label(status.text, systemImage: status.ok == true ? "checkmark.circle.fill" : status.ok == false ? "xmark.octagon.fill" : "hourglass")
@@ -291,7 +302,7 @@ struct ContentView: View {
             ForEach(visibleApps) { app in
                 Button { link.installWatchApp(app) } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(L("Install \(app.name) on the watch", "\(app.name) uygulamasını saate kur")).fontWeight(.semibold)
+                        Text(L("Install \(app.name) on the watch", "\(app.name) uygulamasını saate kur", vi: "Cài \(app.name) lên đồng hồ")).fontWeight(.semibold)
                         Text("\(app.version) · \(app.data.count / 1024) KB").font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -304,19 +315,20 @@ struct ContentView: View {
                         Text("\(app.package) · \(app.version)").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(L("Delete", "Sil"), role: .destructive) { link.deleteWatchApp(app) }
+                    Button(L("Delete", "Sil", vi: "Xóa"), role: .destructive) { link.deleteWatchApp(app) }
                         .buttonStyle(.borderless)
                         .disabled(link.commandsLocked)
                 }
             }
-            Button(L("Show apps on the watch", "Saatteki uygulamaları göster")) { link.loadInstalledApps() }
+            Button(L("Show apps on the watch", "Saatteki uygulamaları göster", vi: "Xem ứng dụng trên đồng hồ")) { link.loadInstalledApps() }
                 .disabled(link.commandsLocked)
         } header: {
-            Text(L("Watch apps", "Saat uygulamaları"))
+            Text(L("Watch apps", "Saat uygulamaları", vi: "Ứng dụng đồng hồ"))
         } footer: {
             if WatchAppCatalog.all.isEmpty && !filmMode {
                 Text(L("No watch app is bundled yet. Apps built with tools/build-watch-app.sh land in WatchApps/ and show up here with an \"Install\" button (see README).",
-                       "Uygulamanın içinde saat uygulaması yok. tools/build-watch-app.sh ile derlenen .bin dosyaları WatchApps/ klasörüne düşer ve burada \"Kur\" düğmesi olarak çıkar (README)."))
+                       "Uygulamanın içinde saat uygulaması yok. tools/build-watch-app.sh ile derlenen .bin dosyaları WatchApps/ klasörüne düşer ve burada \"Kur\" düğmesi olarak çıkar (README).",
+                       vi: "Chưa có ứng dụng đồng hồ nào đi kèm sẵn."))
             }
         }
     }
@@ -325,7 +337,7 @@ struct ContentView: View {
         Section {
             if let status = link.watchFaceStatus {
                 if let progress = link.watchAppProgress {
-                    ProgressView(value: progress) { Text(status + " " + L("\(Int(progress * 100))%", "%\(Int(progress * 100))")).font(.callout) }
+                    ProgressView(value: progress) { Text(status + " " + L("\(Int(progress * 100))%", "%\(Int(progress * 100))", vi: "\(Int(progress * 100))%")).font(.callout) }
                 } else {
                     Text(status).font(.callout)
                 }
@@ -337,7 +349,7 @@ struct ContentView: View {
                 let name = url.deletingPathExtension().lastPathComponent
                 let compatibility = WatchFaceCompatibility.evaluate(screenCode: WatchFaceCatalog.screens[url] ?? "?", device: link.watchFaceParams)
                 VStack(alignment: .leading, spacing: 2) {
-                    Button(L("Install the \(name) watch face", "\(name) kadranını saate kur")) { link.installWatchFace(url, title: name) }
+                    Button(L("Install the \(name) watch face", "\(name) kadranını saate kur", vi: "Cài mặt đồng hồ \(name)")) { link.installWatchFace(url, title: name) }
                         .disabled(link.commandsLocked || compatibility.blocksInstall)
                         .fontWeight(.semibold)
                     if link.watchFaceParams != nil {
@@ -346,21 +358,22 @@ struct ContentView: View {
                 }
             }
             if !filmMode {
-                Button(L("Install a watch face (.hwt)", "Saate kadran yükle (.hwt)")) { pickingWatchFace = true }
+                Button(L("Install a watch face (.hwt)", "Saate kadran yükle (.hwt)", vi: "Cài mặt đồng hồ từ tệp (.hwt)")) { pickingWatchFace = true }
                     .disabled(link.commandsLocked)
                     .fontWeight(WatchFaceCatalog.all.isEmpty ? .semibold : .regular)
                 // Newer watches may want the face in another form; nothing tells which, so it is a setting to try
-                Picker(L("Upload method", "Yükleme yöntemi"), selection: $faceUploadMethod) {
+                Picker(L("Upload method", "Yükleme yöntemi", vi: "Kiểu tải mặt đồng hồ"), selection: $faceUploadMethod) {
                     ForEach(WatchFaceUploadMethod.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 .disabled(link.commandsLocked)
             }
         } header: {
-            Text(L("Watch faces", "Kadranlar"))
+            Text(L("Watch faces", "Kadranlar", vi: "Mặt đồng hồ"))
         } footer: {
             if !filmMode {
                 Text(L("Watch faces made with Huawei Theme Studio (.hwt) for this watch's screen. The app checks the package's screen against the watch first, then shows each stage: transferred, confirmed by the watch, installed (in the watch's list), active. The two bundled faces are made for 466×466 round screens.",
-                       "Bu saatin ekranı için Huawei Theme Studio ile yapılan kadranlar (.hwt). Uygulama önce paketin ekranını saatle karşılaştırır, sonra her aşamayı gösterir: aktarıldı, saat onayladı, kuruldu (saatin listesinde), etkin. Gelen iki kadran 466×466 yuvarlak ekranlar içindir."))
+                       "Bu saatin ekranı için Huawei Theme Studio ile yapılan kadranlar (.hwt). Uygulama önce paketin ekranını saatle karşılaştırır, sonra her aşamayı gösterir: aktarıldı, saat onayladı, kuruldu (saatin listesinde), etkin. Gelen iki kadran 466×466 yuvarlak ekranlar içindir.",
+                       vi: "Hỗ trợ tệp mặt đồng hồ (.hwt) đúng độ phân giải màn hình đồng hồ (GT 2 Pro là 454×454; hai mặt mẫu đi kèm dành cho màn hình 466×466)."))
             }
         }
         .fileImporter(isPresented: $pickingWatchFace, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
@@ -373,21 +386,23 @@ struct ContentView: View {
             if let status = link.musicUploadStatus {
                 Text(status).font(.callout)
             }
-            Button(L("Upload music to the watch", "Saate müzik yükle")) { pickingMusic = true }
+            Button(L("Upload music to the watch", "Saate müzik yükle", vi: "Chép nhạc vào đồng hồ")) { pickingMusic = true }
                 .disabled(link.commandsLocked)
                 .fontWeight(.semibold)
             if let storage = link.musicStorage {
-                LabeledContent(L("On the watch", "Saatte"),
+                LabeledContent(L("On the watch", "Saatte", vi: "Trên đồng hồ"),
                                value: L("\(storage.songs)/\(storage.maxSongs) songs · \(storage.freeMB) MB free",
-                                        "\(storage.songs)/\(storage.maxSongs) şarkı · \(storage.freeMB) MB boş"))
+                                        "\(storage.songs)/\(storage.maxSongs) şarkı · \(storage.freeMB) MB boş",
+                                        vi: "\(storage.songs)/\(storage.maxSongs) bài · trống \(storage.freeMB) MB"))
             }
-            Button(L("Show the watch's music storage", "Saatin müzik hafızasını göster")) { link.loadMusicStorage() }
+            Button(L("Show the watch's music storage", "Saatin müzik hafızasını göster", vi: "Xem bộ nhớ nhạc trên đồng hồ")) { link.loadMusicStorage() }
                 .disabled(link.commandsLocked)
         } header: {
-            Text(L("Watch music player", "Saatin müzik çaları"))
+            Text(L("Watch music player", "Saatin müzik çaları", vi: "Nhạc lưu trên đồng hồ"))
         } footer: {
             Text(L("MP3, M4A, AAC, FLAC, WAV or OPUS files go to the watch's storage and play from the watch's own Music app without the phone. DRM-protected songs (Spotify, Apple Music) cannot be uploaded. Large files take a few minutes.",
-                   "MP3, M4A, AAC, FLAC, WAV ya da OPUS dosyaları saatin hafızasına gider; saatin kendi Müzik uygulamasından telefonsuz çalınır. DRM'li (Spotify, Apple Music) şarkılar yüklenemez. Büyük dosyalar birkaç dakika sürer."))
+                   "MP3, M4A, AAC, FLAC, WAV ya da OPUS dosyaları saatin hafızasına gider; saatin kendi Müzik uygulamasından telefonsuz çalınır. DRM'li (Spotify, Apple Music) şarkılar yüklenemez. Büyük dosyalar birkaç dakika sürer.",
+                   vi: "Hỗ trợ tệp MP3, M4A, AAC, FLAC, WAV, OPUS lưu trực tiếp vào bộ nhớ đồng hồ để phát độc lập. Không hỗ trợ nhạc có DRM."))
         }
         .fileImporter(isPresented: $pickingMusic, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { link.uploadMusic(urls) }
@@ -395,17 +410,17 @@ struct ContentView: View {
     }
 
     private var notificationSection: some View {
-        Section(L("Send a notification to the watch", "Saate bildirim gönder")) {
-            TextField(L("Message", "Mesaj"), text: $message, axis: .vertical)
+        Section(L("Send a notification to the watch", "Saate bildirim gönder", vi: "Gửi thông báo thử tới đồng hồ")) {
+            TextField(L("Message", "Mesaj", vi: "Nội dung tin nhắn"), text: $message, axis: .vertical)
                 .lineLimit(1...4)
                 .focused($messageFocused)
                 .toolbar {
                     ToolbarItemGroup(placement: .keyboard) {
                         Spacer()
-                        Button(L("Done", "Bitti")) { messageFocused = false }
+                        Button(L("Done", "Bitti", vi: "Xong")) { messageFocused = false }
                     }
                 }
-            Button(L("Send", "Gönder")) {
+            Button(L("Send", "Gönder", vi: "Gửi")) {
                 messageFocused = false
                 link.sendMessage(message)
             }
@@ -415,17 +430,17 @@ struct ContentView: View {
 
     private var logSection: some View {
         Section {
-            Toggle(L("Pairing diagnostics (no keys)", "Eşleşme tanılaması (anahtarsız)"), isOn: $pairingDiagnostics)
+            Toggle(L("Pairing diagnostics (no keys)", "Eşleşme tanılaması (anahtarsız)", vi: "Chi tiết chẩn đoán ghép nối (không ghi khóa)"), isOn: $pairingDiagnostics)
             ForEach(link.log.reversed()) { LogRow(entry: $0, text: link.display($0.text)) }
         } header: {
             HStack {
-                Text(L("Log (newest first)", "Log (en yeni üstte)"))
+                Text(L("Log (newest first)", "Log (en yeni üstte)", vi: "Nhật ký (mới nhất ở trên)"))
                 Spacer()
-                Button(L("Clear", "Temizle"), systemImage: "trash") { link.clearLog() }
+                Button(L("Clear", "Temizle", vi: "Xóa"), systemImage: "trash") { link.clearLog() }
                     .labelStyle(.iconOnly)
                     .disabled(link.log.isEmpty)
                 if !filmMode {
-                Button(copied ? L("Copied", "Kopyalandı") : L("Copy", "Kopyala")) {
+                Button(copied ? L("Copied", "Kopyalandı", vi: "Đã chép") : L("Copy", "Kopyala", vi: "Sao chép")) {
                     UIPasteboard.general.string = link.logText
                     copied = true
                     Task {
@@ -452,7 +467,7 @@ private struct DeviceRow: View {
                     .foregroundStyle(.primary)
                 HStack(spacing: 6) {
                     if device.looksHuawei { Text("Huawei").foregroundStyle(.orange) }
-                    if device.systemConnected { Text(L("connected to phone", "telefona bağlı")).foregroundStyle(.green) }
+                    if device.systemConnected { Text(L("connected to phone", "telefona bağlı", vi: "đang nối với iPhone")).foregroundStyle(.green) }
                 }
                 .font(.caption)
             }

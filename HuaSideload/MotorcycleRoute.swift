@@ -3,7 +3,7 @@ import Foundation
 // Independent reader for the documented Valhalla route JSON and polyline6 format.
 struct MotorcycleRoute {
     struct Coordinate: Equatable { let latitude: Double; let longitude: Double }
-    struct Step { let index: Int; let instruction: String; let turn: PineNavigationWire.Turn }
+    struct Step { let index: Int; let instruction: String; let turn: PineNavigationWire.Turn; var duration: Double? = nil }
     let coordinates: [Coordinate]
     let steps: [Step]
     let duration: Double
@@ -70,18 +70,11 @@ struct MotorcycleRoute {
                   !text.isEmpty, text.utf8.count < 4096 else { throw RouteError.invalid }
             let names = (maneuver["street_names"] as? [String])?.prefix(2).joined(separator: " / ") ?? ""
             let direction = turn(type)
-            let translated: String
-            switch type {
-            case 1...3: translated = "Khởi hành" + (names.isEmpty ? " theo tuyến" : " theo " + names)
-            case 4...6: translated = legIndex < legs.count-1 ? "Đến điểm dừng \(legIndex+1)" : "Đến điểm đến"
-            case 25: translated = "Nhập làn" + (names.isEmpty ? "" : " vào " + names)
-            case 26:
-                if let count = maneuver["roundabout_exit_count"] as? Int, count > 0 { translated = "Vào vòng xuyến; ra lối số \(count)" }
-                else { translated = "Vào vòng xuyến — theo tuyến" }
-            case 27: translated = "Ra khỏi vòng xuyến" + (names.isEmpty ? "" : " vào " + names)
-            default: translated = direction == .unspecified ? text : direction.title + (names.isEmpty ? "" : " vào " + names)
-            }
-            steps.append(Step(index: offset+index, instruction: translated, turn: direction))
+            let stepDuration = (maneuver["time"] as? Double).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            let translated = Self.translate(type: type, names: names, direction: direction,
+                                            roundaboutExit: maneuver["roundabout_exit_count"] as? Int,
+                                            legIndex: legIndex, legCount: legs.count)
+            steps.append(Step(index: offset+index, instruction: translated, turn: direction, duration: stepDuration))
             lastIndex = index
         }
         if legIndex < legs.count-1 { stopEnds.append(coordinates.count-1) }
@@ -114,6 +107,44 @@ struct MotorcycleRoute {
         }
         guard !routes.isEmpty else { throw firstError ?? RouteError.invalid }
         return routes
+    }
+
+    static func translate(type: Int, names: String, direction: PineNavigationWire.Turn,
+                          roundaboutExit: Int? = nil, legIndex: Int = 0, legCount: Int = 1) -> String {
+        let onto = names.isEmpty ? "" : " vào " + names
+        let along = names.isEmpty ? "" : " theo " + names
+        switch type {
+        case 1...3: return "Khởi hành" + (names.isEmpty ? " theo tuyến" : along)
+        case 4...6: return legIndex < legCount - 1 ? "Đến điểm dừng \(legIndex + 1)" : "Đến điểm đến"
+        case 7: return "Đi tiếp chếch phải" + onto
+        case 8: return "Đi thẳng" + along
+        case 9: return "Chếch phải" + onto
+        case 10: return "Rẽ phải" + onto
+        case 11: return "Ngoặt gấp phải" + onto
+        case 12, 13: return "Quay đầu" + onto
+        case 14: return "Ngoặt gấp trái" + onto
+        case 15: return "Rẽ trái" + onto
+        case 16: return "Chếch trái" + onto
+        case 17: return "Đi tiếp chếch trái" + onto
+        case 18: return "Vào đường dẫn bên phải" + onto
+        case 19: return "Vào đường dẫn bên trái" + onto
+        case 20: return "Ra lối bên phải" + onto
+        case 21: return "Ra lối bên trái" + onto
+        case 22: return "Đi thẳng tiếp" + along
+        case 23: return "Giữ bên phải" + onto
+        case 24: return "Giữ bên trái" + onto
+        case 25: return "Nhập làn" + onto
+        case 26:
+            if let count = roundaboutExit, count > 0 { return "Vào vòng xuyến; ra lối số \(count)" }
+            return "Vào vòng xuyến — theo tuyến"
+        case 27: return "Ra khỏi vòng xuyến" + onto
+        case 28: return "Lên phà" + (names.isEmpty ? "" : " " + names)
+        case 29: return "Rời bến phà" + onto
+        case 37: return "Nhập làn bên phải" + onto
+        case 38: return "Nhập làn bên trái" + onto
+        default:
+            return direction == .unspecified ? (names.isEmpty ? "Đi theo tuyến" : "Đi theo " + names) : direction.title + onto
+        }
     }
 
     static func turn(_ type: Int) -> PineNavigationWire.Turn {

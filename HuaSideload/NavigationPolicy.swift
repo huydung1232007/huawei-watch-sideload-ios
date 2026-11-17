@@ -108,3 +108,80 @@ struct NavigationOutbox {
         return nil
     }
 }
+
+// Keeps phone GPS navigation alive across transient BLE drops, P2P timeouts or
+// closing and reopening Navigation Watch on the wrist.
+struct WatchDeliveryPolicy {
+    private(set) var watchAppClosed = false
+    private(set) var consecutiveFailures = 0
+    private var retryAfter = -Double.infinity
+
+    mutating func reset() {
+        watchAppClosed = false
+        consecutiveFailures = 0
+        retryAfter = -Double.infinity
+    }
+    mutating func watchOpened() { reset() }
+    mutating func watchExited() {
+        watchAppClosed = true
+        consecutiveFailures = 0
+        retryAfter = -Double.infinity
+    }
+    mutating func connectionLost() { reset() }
+    func canAttempt(isPaired: Bool, now: Double) -> Bool {
+        guard isPaired, !watchAppClosed, now.isFinite else { return false }
+        return now >= retryAfter
+    }
+    mutating func succeeded() {
+        consecutiveFailures = 0
+        retryAfter = -Double.infinity
+    }
+    mutating func failed(now: Double) {
+        consecutiveFailures += 1
+        let delay = min(10.0, Double(consecutiveFailures) * 3.0)
+        retryAfter = (now.isFinite ? now : 0) + delay
+    }
+}
+
+// Interpolates remaining time from per-maneuver/per-leg cumulative durations
+// when available, falling back cleanly to distance-proportional scaling.
+enum RouteRemainingTime {
+    struct Milestone: Equatable {
+        let along: Double
+        let elapsed: Double
+    }
+    static func seconds(progress: Double, totalLength: Double, expectedTravelTime: Double, milestones: [Milestone]) -> Double {
+        guard totalLength.isFinite, totalLength > 0, expectedTravelTime.isFinite, expectedTravelTime >= 0 else { return 0 }
+        let clamped = min(totalLength, max(0, progress.isFinite ? progress : 0))
+        let linear = expectedTravelTime * max(0, totalLength - clamped) / totalLength
+        guard milestones.count >= 2,
+              let first = milestones.first, let last = milestones.last,
+              abs(first.along) <= 0.5, abs(first.elapsed) <= 0.5,
+              abs(last.along - totalLength) <= 1.0, last.elapsed > 0,
+              zip(milestones, milestones.dropFirst()).allSatisfy({
+                  $0.0.along.isFinite && $0.1.along.isFinite && $0.0.elapsed.isFinite && $0.1.elapsed.isFinite
+                      && $0.1.along >= $0.0.along && $0.1.elapsed >= $0.0.elapsed
+              }) else { return linear }
+        let scale = expectedTravelTime / last.elapsed
+        for (a, b) in zip(milestones, milestones.dropFirst()) where clamped <= b.along {
+            let span = b.along - a.along
+            let ratio = span > 0.001 ? min(1, max(0, (clamped - a.along) / span)) : 1
+            let elapsed = (a.elapsed + (b.elapsed - a.elapsed) * ratio) * scale
+            return max(0, expectedTravelTime - elapsed)
+        }
+        return 0
+    }
+}
+
+struct RecentSearchQueries {
+    static let limit = 6
+    static func record(_ raw: String, into existing: [String]) -> [String] {
+        let cleaned = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        guard cleaned.count >= 2 else { return Array(existing.prefix(limit)) }
+        let key = cleaned.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN"))
+        let filtered = existing.filter {
+            $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN")) != key
+        }
+        return Array(([cleaned] + filtered).prefix(limit))
+    }
+}

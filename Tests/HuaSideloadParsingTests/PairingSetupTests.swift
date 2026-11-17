@@ -135,4 +135,19 @@ final class PairingSetupTests: XCTestCase {
         }
         XCTAssertTrue(PairingStage.paired.isFullyPaired)
     }
+
+    func testVietnameseLanguageSelectionInLocalizationAndStages() {
+        let previous = UserDefaults.standard.string(forKey: AppLanguage.storageKey)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: AppLanguage.storageKey) }
+            else { UserDefaults.standard.removeObject(forKey: AppLanguage.storageKey) }
+        }
+        UserDefaults.standard.set("vi", forKey: AppLanguage.storageKey)
+        XCTAssertEqual(AppLanguage.current, .vietnamese)
+        XCTAssertEqual(PairingStage.paired.label, "Đã ghép nối")
+        XCTAssertEqual(L("Hello", "Merhaba", vi: "Xin chào"), "Xin chào")
+        UserDefaults.standard.set("en", forKey: AppLanguage.storageKey)
+        XCTAssertEqual(PairingStage.paired.label, "Paired")
+        XCTAssertEqual(L("Hello", "Merhaba", vi: "Xin chào"), "Hello")
+    }
 }

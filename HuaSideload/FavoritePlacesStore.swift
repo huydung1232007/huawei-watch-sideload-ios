@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import SwiftUI
 
 @MainActor
 final class FavoritePlacesStore: ObservableObject {
@@ -16,7 +17,7 @@ final class FavoritePlacesStore: ObservableObject {
     func retryLoadingIfNeeded() { if !canSave { loadExisting() } }
     private func loadExisting() {
         do {
-            places = try file.load().places.sorted { $0.updatedAt > $1.updatedAt }
+            places = try file.load().places
             canSave = true; storageMessage = nil
         } catch {
             canSave = false
@@ -26,9 +27,20 @@ final class FavoritePlacesStore: ObservableObject {
     @discardableResult func save(_ value: FavoritePlace) -> Bool {
         do {
             var place = try value.validated(); place.updatedAt = Date()
-            var next = places.filter { $0.id != place.id }; next.insert(place,at: 0)
+            var next = places
+            if let index = next.firstIndex(where: { $0.id == place.id }) {
+                next[index] = place
+            } else {
+                next.insert(place, at: 0)
+            }
             return persist(next)
         } catch { storageMessage = error.localizedDescription; return false }
+    }
+    func move(fromOffsets source: IndexSet, toOffset destination: Int) {
+        var next = places
+        next.move(fromOffsets: source, toOffset: destination)
+        guard next != places else { return }
+        _ = persist(next)
     }
     @discardableResult func delete(_ id: UUID) -> Bool { persist(places.filter { $0.id != id }) }
     private func persist(_ next: [FavoritePlace]) -> Bool {

@@ -40,4 +40,20 @@ final class RouteStopsTests: XCTestCase {
         XCTAssertNil(RouteLegJoiner.join([]))
         XCTAssertNil(RouteLegJoiner.join(Array(repeating:.init(path:first,gap:0),count:5)))
     }
+    func testSustainedUrbanProximityAndExplicitSkipAdvanceStopCleanly() {
+        let a = UUID(), b = UUID()
+        let boundaries = [RouteStopProgress.Boundary(id: a, along: 100), .init(id: b, along: 250)]
+        var state = RouteStopProgress()
+        // One or two 45 m fixes must not prematurely skip the stop; 3 consecutive valid fixes confirm arrival.
+        XCTAssertNil(state.arrive(boundaries: boundaries, along: 92, distance: 45, accuracy: 30))
+        XCTAssertNil(state.arrive(boundaries: boundaries, along: 96, distance: 44, accuracy: 32))
+        XCTAssertNil(state.arrive(boundaries: boundaries, along: 96, distance: 80, accuracy: 32))
+        XCTAssertNil(state.arrive(boundaries: boundaries, along: 96, distance: 44, accuracy: 32))
+        XCTAssertNil(state.arrive(boundaries: boundaries, along: 98, distance: 42, accuracy: 30))
+        XCTAssertEqual(state.arrive(boundaries: boundaries, along: 100, distance: 40, accuracy: 28), a)
+        XCTAssertEqual(state.next(in: boundaries)?.id, b)
+        XCTAssertEqual(state.skipNext(in: boundaries), b)
+        XCTAssertNil(state.next(in: boundaries))
+        XCTAssertNil(state.skipNext(in: boundaries))
+    }
 }

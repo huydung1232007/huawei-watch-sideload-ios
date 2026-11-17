@@ -21,19 +21,19 @@ enum PairingStage: Equatable {
 
     var label: String {
         switch self {
-        case .none: return L("None", "Yok")
-        case .channelReady: return L("Channel ready, not paired", "Kanal hazır, eşleşilmedi")
-        case .negotiating: return L("Negotiating security…", "Güvenlik müzakere ediliyor…")
+        case .none: return L("None", "Yok", vi: "Chưa kết nối")
+        case .channelReady: return L("Channel ready, not paired", "Kanal hazır, eşleşilmedi", vi: "Kênh sẵn sàng, chưa ghép nối")
+        case .negotiating: return L("Negotiating security…", "Güvenlik müzakere ediliyor…", vi: "Đang thương lượng bảo mật…")
         case .liteAuthenticating: return "Lite 2/4 · Đang xác thực…"
         case .liteBonding: return "Lite 3–4/4 · Đang thiết lập kết nối…"
-        case .pinProcessed: return L("PIN processed, confirm on the watch…", "PIN işlendi, saatte onayla…")
-        case .hiChain: return L("Authenticating (HiChain)…", "Doğrulanıyor (HiChain)…")
-        case .authenticated: return L("Authenticated, setup not finished", "Doğrulandı, kurulum bitmedi")
-        case .finishingSetup: return L("Finishing setup…", "Kurulum tamamlanıyor…")
-        case .paired: return L("Paired", "Eşleşti")
-        case .setupIncomplete(let why): return L("Encrypted, setup incomplete: ", "Şifreli, kurulum eksik: ") + why
-        case .failed(let why): return L("Pairing failed: ", "Eşleşme başarısız: ") + why
-        case .connectionLost: return L("Connection lost", "Bağlantı koptu")
+        case .pinProcessed: return L("PIN processed, confirm on the watch…", "PIN işlendi, saatte onayla…", vi: "Đã xử lý PIN, xác nhận trên đồng hồ…")
+        case .hiChain: return L("Authenticating (HiChain)…", "Doğrulanıyor (HiChain)…", vi: "Đang xác thực (HiChain)…")
+        case .authenticated: return L("Authenticated, setup not finished", "Doğrulandı, kurulum bitmedi", vi: "Đã xác thực, chưa hoàn tất thiết lập")
+        case .finishingSetup: return L("Finishing setup…", "Kurulum tamamlanıyor…", vi: "Đang hoàn tất thiết lập…")
+        case .paired: return L("Paired", "Eşleşti", vi: "Đã ghép nối")
+        case .setupIncomplete(let why): return L("Encrypted, setup incomplete: ", "Şifreli, kurulum eksik: ", vi: "Đã mã hóa, thiết lập chưa đủ: ") + why
+        case .failed(let why): return L("Pairing failed: ", "Eşleşme başarısız: ", vi: "Ghép nối thất bại: ") + why
+        case .connectionLost: return L("Connection lost", "Bağlantı koptu", vi: "Mất kết nối")
         }
     }
 }

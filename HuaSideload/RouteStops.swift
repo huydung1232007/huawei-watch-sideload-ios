@@ -5,7 +5,9 @@ import Foundation
 struct RouteStopProgress {
     struct Boundary: Equatable { let id: UUID; let along: Double }
     private(set) var visited = Set<UUID>()
-    mutating func reset() { visited.removeAll() }
+    private var pendingStop: UUID?
+    private var nearbySamples = 0
+    mutating func reset() { visited.removeAll(); pendingStop = nil; nearbySamples = 0 }
     func next(in boundaries: [Boundary]) -> Boundary? { boundaries.first { !visited.contains($0.id) } }
     func projectionMaximum(_ proposed: Double, boundaries: [Boundary]) -> Double {
         guard let next = next(in: boundaries) else { return proposed }
@@ -13,8 +15,32 @@ struct RouteStopProgress {
     }
     mutating func arrive(boundaries: [Boundary], along: Double, distance: Double, accuracy: Double) -> UUID? {
         guard let next = next(in: boundaries), along.isFinite, distance.isFinite, accuracy.isFinite,
-              (0...25).contains(accuracy), (0...35).contains(distance), abs(along-next.along) <= 40 else { return nil }
-        visited.insert(next.id); return next.id
+              accuracy >= 0, distance >= 0 else {
+            pendingStop = nil; nearbySamples = 0; return nil
+        }
+        if accuracy <= 25, distance <= 35, abs(along - next.along) <= 40 {
+            visited.insert(next.id); pendingStop = nil; nearbySamples = 0
+            return next.id
+        }
+        // Urban storefronts, gas stations or divided roads can sit 35-55 m from the
+        // kerb or under light canopy. Accept 3 consecutive nearby fixes without
+        // letting a single noisy sample skip a mandatory stop.
+        if accuracy <= 40, distance <= 55, abs(along - next.along) <= 60 {
+            if pendingStop == next.id { nearbySamples += 1 }
+            else { pendingStop = next.id; nearbySamples = 1 }
+            if nearbySamples >= 3 {
+                visited.insert(next.id); pendingStop = nil; nearbySamples = 0
+                return next.id
+            }
+            return nil
+        }
+        pendingStop = nil; nearbySamples = 0
+        return nil
+    }
+    mutating func skipNext(in boundaries: [Boundary]) -> UUID? {
+        guard let next = next(in: boundaries) else { return nil }
+        visited.insert(next.id); pendingStop = nil; nearbySamples = 0
+        return next.id
     }
 }
 

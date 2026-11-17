@@ -328,27 +328,28 @@ struct WatchSpeakerSection: View {
         Section {
             switch speaker.state {
             case .idle:
-                Button(speaker.buttonTitle?() ?? L("Play the phone's audio on the watch", "Telefonun sesini saate yansıt")) { speaker.ring() }
+                Button(speaker.buttonTitle?() ?? L("Play the phone's audio on the watch", "Telefonun sesini saate yansıt", vi: "Phát âm thanh iPhone ra loa đồng hồ")) { speaker.ring() }
                     .fontWeight(.semibold)
             case .ringing:
-                Label(L("The watch is ringing: answer it on the watch", "Saat çalıyor: saatten aç"), systemImage: "phone.arrow.down.left")
-                Button(L("Cancel", "Vazgeç"), role: .destructive) { speaker.stop() }
+                Label(L("The watch is ringing: answer it on the watch", "Saat çalıyor: saatten aç", vi: "Đồng hồ đang đổ chuông: hãy bắt máy trên đồng hồ"), systemImage: "phone.arrow.down.left")
+                Button(L("Cancel", "Vazgeç", vi: "Hủy"), role: .destructive) { speaker.stop() }
             case .playing:
-                Label(L("The watch speaker is on", "Saatin hoparlörü açık"), systemImage: "speaker.wave.2.fill").foregroundStyle(.green)
-                Button(L("End", "Bitir"), role: .destructive) { speaker.stop() }
+                Label(L("The watch speaker is on", "Saatin hoparlörü açık", vi: "Loa đồng hồ đang bật"), systemImage: "speaker.wave.2.fill").foregroundStyle(.green)
+                Button(L("End", "Bitir", vi: "Kết thúc"), role: .destructive) { speaker.stop() }
             }
             if speaker.onMicToggled != nil {
-                Toggle(L("Mic button on the watch changes the song", "Saatteki mikrofon tuşuyla şarkı değiştir"), isOn: $speaker.micGestures)
+                Toggle(L("Mic button on the watch changes the song", "Saatteki mikrofon tuşuyla şarkı değiştir", vi: "Dùng nút mic trên đồng hồ để chuyển bài"), isOn: $speaker.micGestures)
                     .disabled(speaker.state != .idle)
             }
             if let status = speaker.status, speaker.state == .idle {
                 Text(status).font(.callout).foregroundStyle(.secondary)
             }
         } header: {
-            Text(L("Watch speaker", "Saatin hoparlörü"))
+            Text(L("Watch speaker", "Saatin hoparlörü", vi: "Loa đồng hồ"))
         } footer: {
             Text(speaker.footer?() ?? L("The watch rings like a call. Answer it on the watch, then play something in any app on the iPhone (Spotify, Apple Music, a podcast…): it comes out of the watch speaker at phone-call quality. Hang up on the watch to stop. The watch has to be connected to the iPhone for calls.",
-                                     "Saat arama gibi çalar. Saatten aç, sonra iPhone'da herhangi bir uygulamada (Spotify, Apple Music, podcast…) bir şey çal: saatin hoparlöründen telefon görüşmesi kalitesinde çıkar. Saatten kapatınca biter. Saatin aramalar için iPhone'a bağlı olması gerekir."))
+                                     "Saat arama gibi çalar. Saatten aç, sonra iPhone'da herhangi bir uygulamada (Spotify, Apple Music, podcast…) bir şey çal: saatin hoparlöründen telefon görüşmesi kalitesinde çıkar. Saatten kapatınca biter. Saatin aramalar için iPhone'a bağlı olması gerekir.",
+                                     vi: "Đồng hồ sẽ đổ chuông như cuộc gọi. Bắt máy trên đồng hồ để truyền âm thanh từ iPhone qua loa đồng hồ; cúp máy trên đồng hồ để dừng. Cần kết nối Bluetooth cuộc gọi của đồng hồ với iPhone."))
         }
     }
 }

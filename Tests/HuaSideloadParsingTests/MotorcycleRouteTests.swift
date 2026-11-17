@@ -156,4 +156,16 @@ final class MotorcycleRouteTests: XCTestCase {
         XCTAssertEqual(try MotorcycleRoute.decodeOptions(encode(fixture())).count, 1)
     }
 
+    func testDetailedVietnameseManeuverTranslationsAndStepDurations() throws {
+        let route = try MotorcycleRoute.decode(encode(fixture()))
+        XCTAssertEqual(route.steps.first?.duration ?? 0, 80.883, accuracy: 0.01)
+        XCTAssertEqual(route.steps[1].duration ?? 0, 10.216, accuracy: 0.01)
+        XCTAssertEqual(MotorcycleRoute.translate(type: 9, names: "Lê Lợi", direction: .right), "Chếch phải vào Lê Lợi")
+        XCTAssertEqual(MotorcycleRoute.translate(type: 16, names: "Pasteur", direction: .left), "Chếch trái vào Pasteur")
+        XCTAssertEqual(MotorcycleRoute.translate(type: 11, names: "Nguyễn Huệ", direction: .right), "Ngoặt gấp phải vào Nguyễn Huệ")
+        XCTAssertEqual(MotorcycleRoute.translate(type: 23, names: "Võ Văn Kiệt", direction: .right), "Giữ bên phải vào Võ Văn Kiệt")
+        XCTAssertEqual(MotorcycleRoute.translate(type: 28, names: "Cát Lái", direction: .unspecified), "Lên phà Cát Lái")
+        XCTAssertEqual(MotorcycleRoute.translate(type: 999, names: "Trần Hưng Đạo", direction: .unspecified), "Đi theo Trần Hưng Đạo")
+    }
+
 }

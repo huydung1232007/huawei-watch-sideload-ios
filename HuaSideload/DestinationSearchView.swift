@@ -4,12 +4,14 @@ import SwiftUI
 struct DestinationSearchView: View {
     @ObservedObject var navigator: RouteNavigator
     var addingStop = false
+    var initialQuery: String? = nil
     @StateObject private var search = DestinationSearchModel()
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
     @State private var query = ""
     @State private var appeared = false
     @State private var visualPreview = false
+    @State private var suppressNextEdit = false
 
     var body: some View {
         Group {
@@ -26,15 +28,27 @@ struct DestinationSearchView: View {
                 visualPreview = true; query = "Bưu điện"; search.prepareVisualPreview(preview); return
             }
             #endif
-            focused = true
             if !navigator.hasLocation { navigator.requestLocation() }
+            let seed = (initialQuery ?? navigator.pendingSearchQuery)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            navigator.pendingSearchQuery = nil
+            if let initial = seed, !initial.isEmpty {
+                suppressNextEdit = true
+                query = initial
+                focused = false
+                search.submit(initial, region: navigator.destinationSearchRegion)
+                return
+            }
+            focused = true
         }
     }
 
     private var searchPage: some View {
         NavigationStack {
             List {
-                if query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty { favorites }
+                if query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+                    favorites
+                    recentSearches
+                }
                 else {
                     Section {
                         if search.phase == .suggestions || search.phase == .suggesting {
@@ -46,8 +60,9 @@ struct DestinationSearchView: View {
                             }
                         } else {
                             ForEach(search.results) { place in
+                                let badge = navigator.distanceBadge(to: place.item.placemark.coordinate)
                                 Button { focused = false; search.choose(place) } label: {
-                                    placeRow(place.name,address:place.address,icon:"mappin",color:.orange)
+                                    placeRow(place.name,address:place.address,badge:badge,icon:"mappin",color:.orange)
                                 }.accessibilityIdentifier("place-result")
                             }
                         }
@@ -94,6 +109,7 @@ struct DestinationSearchView: View {
                     .focused($focused).submitLabel(.search).autocorrectionDisabled()
                     .onSubmit { submit() }
                     .onChange(of:query) { _,value in
+                        if suppressNextEdit { suppressNextEdit = false; return }
                         if !visualPreview { search.edit(value,region:navigator.destinationSearchRegion) }
                     }
                     .accessibilityIdentifier("destination-search-input")
@@ -113,26 +129,83 @@ struct DestinationSearchView: View {
 
     private var favorites: some View {
         Section {
-            if navigator.favorites.places.isEmpty {
+            if navigator.favorites.places.isEmpty && search.recentQueries.isEmpty {
                 ContentUnavailableView("Tìm nơi bạn muốn đến",systemImage:"map",
                     description:Text("Nhập tên quán, địa danh hoặc địa chỉ. Gợi ý sẽ xuất hiện khi bạn gõ."))
             } else {
                 ForEach(navigator.favorites.places) { place in
-                    Button {
-                        focused = false
-                        let item = MKMapItem(placemark:MKPlacemark(coordinate:.init(latitude:place.latitude,longitude:place.longitude)))
-                        item.name = place.name; search.choose(.init(item:item))
-                    } label: { placeRow(place.name,address:"Địa điểm đã lưu",icon:"star.fill",color:.orange) }
+                    let coord = CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
+                    let badge = navigator.distanceBadge(to: coord)
+                    HStack(spacing: 8) {
+                        Button {
+                            focused = false
+                            let item = MKMapItem(placemark:MKPlacemark(coordinate:coord))
+                            item.name = place.name
+                            let dest = RouteNavigator.Destination(item: item)
+                            if addingStop {
+                                navigator.addStopover(dest)
+                                dismiss()
+                            } else {
+                                navigator.selectAndCalculate(dest)
+                                dismiss()
+                            }
+                        } label: {
+                            placeRow(place.name,address:addingStop ? "Chạm để thêm điểm dừng" : "Chạm để tính tuyến ngay",
+                                     badge:badge,icon:"star.fill",color:.orange)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            focused = false
+                            let item = MKMapItem(placemark:MKPlacemark(coordinate:coord))
+                            item.name = place.name
+                            search.choose(.init(item:item))
+                        } label: {
+                            Image(systemName: "map")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34, height: 34)
+                                .background(Color(.tertiarySystemGroupedBackground), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Xem ghim \(place.name) trên bản đồ")
+                    }
                 }
             }
         } header: { if !navigator.favorites.places.isEmpty { Text("Yêu thích").textCase(nil) } }
+    }
+
+    @ViewBuilder
+    private var recentSearches: some View {
+        if !search.recentQueries.isEmpty {
+            Section {
+                ForEach(search.recentQueries, id: \.self) { recent in
+                    Button {
+                        suppressNextEdit = true
+                        query = recent
+                        focused = false
+                        search.submit(recent, region: navigator.destinationSearchRegion)
+                    } label: {
+                        placeRow(recent, address: "Tìm kiếm gần đây", icon: "clock.arrow.circlepath", color: .secondary)
+                    }
+                    .swipeActions {
+                        Button("Xóa", role: .destructive) { search.removeRecent(recent) }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Tìm gần đây")
+                    Spacer()
+                    Button("Xóa hết") { search.clearRecents() }.font(.caption)
+                }.textCase(nil)
+            }
+        }
     }
 
     private func submit() {
         guard !visualPreview else { return }
         focused = false; search.submit(query,region:navigator.destinationSearchRegion)
     }
-    private func placeRow(_ title: String,address: String,icon: String,color: Color) -> some View {
+    private func placeRow(_ title: String,address: String,badge: String? = nil,icon: String,color: Color) -> some View {
         HStack(spacing:12) {
             Image(systemName:icon).font(.body.weight(.semibold)).foregroundStyle(color)
                 .frame(width:38,height:38).background(color.opacity(0.1),in:RoundedRectangle(cornerRadius:12))
@@ -141,6 +214,11 @@ struct DestinationSearchView: View {
                 if !address.isEmpty { Text(address).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             }
             Spacer(minLength:2)
+            if let badge {
+                Text(badge).font(.caption.weight(.semibold)).foregroundStyle(.blue)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.blue.opacity(0.09), in: Capsule())
+            }
             Image(systemName:"chevron.right").font(.caption2.bold()).foregroundStyle(.tertiary)
         }.padding(.vertical,6).contentShape(Rectangle())
     }

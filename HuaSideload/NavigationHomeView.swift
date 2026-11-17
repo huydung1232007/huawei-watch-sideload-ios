@@ -14,6 +14,8 @@ struct NavigationHomeView: View {
     @State private var importingPlace = false
     @State private var panelCollapsed = false
     @State private var showingStops = false
+    @State private var showingSteps = false
+    @State private var searchInitialQuery: String?
     @State private var importInitialInput: String?
     @State private var importAutomatically = false
     @State private var shareOpeningID: UUID?
@@ -52,9 +54,12 @@ struct NavigationHomeView: View {
         }
         .safeAreaInset(edge: .top,spacing: 0) { header }
         .safeAreaInset(edge: .bottom,spacing: 0) { bottomPanel }
-        .sheet(isPresented: $searching) { DestinationSearchView(navigator: navigator) }
+        .sheet(isPresented: $searching, onDismiss: { searchInitialQuery = nil }) {
+            DestinationSearchView(navigator: navigator, initialQuery: searchInitialQuery)
+        }
         .sheet(isPresented: $settings) { NavigationSettingsView(navigator: navigator,link: link) }
         .sheet(isPresented: $showingStops) { RouteStopoversView(navigator:navigator) }
+        .sheet(isPresented: $showingSteps) { RouteStepsSheet(steps: navigator.instructionPreview, summary: navigator.preview) }
         .sheet(isPresented: $showingFavorites) {
             FavoritePlacesView(navigator:navigator,favorites:navigator.favorites,captureOnOpen:captureFavoriteOnOpen)
         }
@@ -67,6 +72,10 @@ struct NavigationHomeView: View {
         }
         .onAppear {
             if let shared = navigator.sharedPlace { presentSharedPlace(shared) }
+            if let pending = navigator.pendingSearchQuery {
+                searchInitialQuery = pending
+                searching = true
+            }
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"]?.hasPrefix("favorite") == true { showingFavorites = true }
             if ProcessInfo.processInfo.environment["HUASIDELOAD_UI_PREVIEW"] == "pin" {
@@ -81,6 +90,11 @@ struct NavigationHomeView: View {
         }
         .onDisappear { shareTask?.cancel(); shareTask = nil; shareOpeningID = nil }
         .onChange(of:navigator.sharedPlace?.id) { _,_ in if let shared = navigator.sharedPlace { presentSharedPlace(shared) } }
+        .onChange(of:navigator.pendingSearchQuery) { _, pending in
+            guard let pending else { return }
+            searchInitialQuery = pending
+            searching = true
+        }
         .onChange(of:navigator.routeRevision) { _,_ in frameSelectedRoute() }
         .onChange(of:panelCollapsed) { _,_ in frameSelectedRoute() }
         .onChange(of:navigator.destination?.id) { _,_ in panelCollapsed = false }
@@ -201,7 +215,7 @@ struct NavigationHomeView: View {
                 Button { link.startRouteNavigation() } label: {
                     Label("Bắt đầu",systemImage:"location.north.fill").font(.subheadline.bold()).padding(.vertical,6)
                 }.buttonStyle(.borderedProminent)
-                    .disabled(!link.isPaired || link.commandsLocked || navigator.isCalculating)
+                    .disabled(link.commandsLocked || navigator.isCalculating)
                 clearDestinationButton
             }
             HStack(spacing:8) {
@@ -261,16 +275,19 @@ struct NavigationHomeView: View {
             } else if !navigator.routeChoices.isEmpty {
                 routeChoices
             }
-            Text(navigator.status).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+            Text(navigator.status).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
             if navigator.hasRoute {
                 Button { link.startRouteNavigation() } label: {
                     Label("Bắt đầu hành trình",systemImage: "location.north.fill")
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical,9)
                 }
                 .buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 16))
-                .disabled(!link.isPaired || link.commandsLocked || navigator.isCalculating)
+                .disabled(link.commandsLocked || navigator.isCalculating)
                 if !link.isPaired {
-                    Button("Kết nối đồng hồ để bắt đầu",action: connectWatch).font(.caption)
+                    Button(action: connectWatch) {
+                        Label("Chưa nối đồng hồ — sẽ dẫn đường trên iPhone (chạm để kết nối)", systemImage: "applewatch")
+                            .font(.caption)
+                    }
                 }
             } else if navigator.destination != nil && !navigator.isCalculating {
                 Button { navigator.calculateRoute() } label: {
@@ -302,7 +319,15 @@ struct NavigationHomeView: View {
             HStack {
                 Text("Chọn đường đi").font(.subheadline.bold())
                 Spacer()
-                Text("\(navigator.routeChoices.count) tuyến").font(.caption).foregroundStyle(.secondary)
+                if !navigator.instructionPreview.isEmpty {
+                    Button { showingSteps = true } label: {
+                        Label("Các bước rẽ (\(navigator.instructionPreview.count))", systemImage: "list.bullet")
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                }
+                Text("· \(navigator.routeChoices.count) tuyến").font(.caption).foregroundStyle(.secondary)
             }
             ScrollView(.horizontal,showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -364,6 +389,21 @@ struct NavigationHomeView: View {
             HStack(spacing: 8) {
                 if navigator.isRerouting { ProgressView().controlSize(.small) }
                 Text(navigator.status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Spacer(minLength: 0)
+                if link.canResendWatchGuidance {
+                    Button("Gửi lại đồng hồ") { link.resendWatchGuidance() }
+                        .font(.caption.bold()).buttonStyle(.bordered)
+                } else if !link.isPaired {
+                    Button("Nối đồng hồ", action: connectWatch)
+                        .font(.caption.bold()).buttonStyle(.bordered)
+                }
+            }
+            if navigator.hasRemainingStopovers {
+                Button { navigator.skipNextStopover() } label: {
+                    Label("Bỏ qua điểm dừng: \(navigator.nextStopoverName ?? "tiếp theo")", systemImage: "forward.end.fill")
+                        .font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 5)
+                }
+                .buttonStyle(.bordered).tint(.purple).disabled(navigator.isRerouting)
             }
             HStack(spacing: 10) {
                 Button { navigator.rerouteManually() } label: {
@@ -443,6 +483,39 @@ private struct NavigationSettingsView: View {
                 }
             }
             .navigationTitle("Tùy chọn").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Xong") { dismiss() } } }
+        }
+    }
+}
+
+private struct RouteStepsSheet: View {
+    let steps: [String]
+    let summary: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                if !summary.isEmpty {
+                    Section {
+                        Label(summary, systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                Section("Trình tự di chuyển") {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.blue)
+                                .frame(width: 26, height: 26)
+                                .background(Color.blue.opacity(0.1), in: Circle())
+                            Text(step).font(.subheadline)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .navigationTitle("Các bước rẽ").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Xong") { dismiss() } } }
         }
     }

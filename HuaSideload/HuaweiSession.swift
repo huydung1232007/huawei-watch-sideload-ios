@@ -8,10 +8,10 @@ enum HuaweiSessionError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .timeout(let label): return L("\(label): the watch did not answer (timeout)", "\(label): saat cevap vermedi (zaman aşımı)")
-        case .disconnected: return L("Connection lost", "Bağlantı koptu")
-        case .notPaired: return L("Pair with the watch first", "Önce eşleşmek gerekiyor")
-        case .unsupported(let s): return L("Not supported: \(s)", "Desteklenmiyor: \(s)")
+        case .timeout(let label): return L("\(label): the watch did not answer (timeout)", "\(label): saat cevap vermedi (zaman aşımı)", vi: "\(label): đồng hồ không phản hồi (hết thời gian chờ)")
+        case .disconnected: return L("Connection lost", "Bağlantı koptu", vi: "Mất kết nối")
+        case .notPaired: return L("Pair with the watch first", "Önce eşleşmek gerekiyor", vi: "Cần ghép nối với đồng hồ trước")
+        case .unsupported(let s): return L("Not supported: \(s)", "Desteklenmiyor: \(s)", vi: "Không hỗ trợ: \(s)")
         }
     }
 }

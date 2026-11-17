@@ -31,13 +31,28 @@ struct RouteStopoversView: View {
                                     .disabled(index == navigator.stopovers.count-1)
                             }.font(.caption.bold()).buttonStyle(.borderless)
                         }.padding(.vertical,4)
-                            .swipeActions { Button("Xóa",role:.destructive) { navigator.removeStopover(stop.id) } }
+                            .swipeActions {
+                                Button("Xóa",role:.destructive) { navigator.removeStopover(stop.id) }
+                                if navigator.destination != nil {
+                                    Button("Làm điểm cuối") { navigator.swapStopoverWithDestination(stop.id) }.tint(.orange)
+                                }
+                            }
+                            .contextMenu {
+                                if navigator.destination != nil {
+                                    Button("Đổi làm điểm cuối", systemImage: "flag.checkered") {
+                                        navigator.swapStopoverWithDestination(stop.id)
+                                    }
+                                }
+                                Button("Xóa điểm dừng", systemImage: "trash", role: .destructive) {
+                                    navigator.removeStopover(stop.id)
+                                }
+                            }
                     }
                     if navigator.stopovers.count < 3 {
                         Button { adding = true } label: { Label("Thêm điểm dừng",systemImage:"plus.circle.fill") }
                     }
                 } header: { Text("Điểm dừng · \(navigator.stopovers.count)/3") }
-                footer: { Text("Đi theo thứ tự từ trên xuống. Vuốt một điểm sang trái để xóa; dùng mũi tên để đổi thứ tự. Đến gần điểm dừng với GPS chính xác, app tự chuyển sang chặng tiếp theo.") }
+                footer: { Text("Đi theo thứ tự từ trên xuống. Vuốt sang trái để xóa hoặc đổi làm điểm cuối; dùng mũi tên để đổi thứ tự. Đến gần điểm dừng, app tự chuyển sang chặng tiếp theo.") }
                 Section {
                     Label(navigator.destination?.name ?? "Chưa chọn điểm đến",systemImage:"flag.checkered")
                 } header: { Text("Điểm cuối") }

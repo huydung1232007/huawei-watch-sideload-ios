@@ -150,4 +150,62 @@ final class NavigationPolicyTests: XCTestCase {
         let request = try MotorcycleRoute.request(origin: .init(latitude: 10,longitude: 106),destination: .init(latitude: 11,longitude: 106),alternatives: false)
         XCTAssertEqual((try JSONSerialization.jsonObject(with: request) as? [String: Any])?["alternates"] as? Int,0)
     }
+    func testWatchDeliveryPolicySurvivesExitTransientFailureAndReconnect() {
+        var policy = WatchDeliveryPolicy()
+        XCTAssertFalse(policy.canAttempt(isPaired: false, now: 10))
+        XCTAssertTrue(policy.canAttempt(isPaired: true, now: 10))
+
+        policy.failed(now: 10)
+        XCTAssertEqual(policy.consecutiveFailures, 1)
+        XCTAssertFalse(policy.canAttempt(isPaired: true, now: 12.9))
+        XCTAssertTrue(policy.canAttempt(isPaired: true, now: 13.0))
+
+        policy.failed(now: 13.0)
+        XCTAssertFalse(policy.canAttempt(isPaired: true, now: 18.9))
+        XCTAssertTrue(policy.canAttempt(isPaired: true, now: 19.0))
+
+        policy.succeeded()
+        XCTAssertEqual(policy.consecutiveFailures, 0)
+        XCTAssertTrue(policy.canAttempt(isPaired: true, now: 19.1))
+
+        policy.watchExited()
+        XCTAssertTrue(policy.watchAppClosed)
+        XCTAssertFalse(policy.canAttempt(isPaired: true, now: 100))
+
+        policy.watchOpened()
+        XCTAssertFalse(policy.watchAppClosed)
+        XCTAssertTrue(policy.canAttempt(isPaired: true, now: 100))
+
+        policy.failed(now: 100)
+        policy.connectionLost()
+        XCTAssertTrue(policy.canAttempt(isPaired: true, now: 100.5))
+    }
+    func testSegmentAwareRemainingTimeReflectsSlowAndFastLegs() {
+        let milestones: [RouteRemainingTime.Milestone] = [
+            .init(along: 0, elapsed: 0),
+            .init(along: 1000, elapsed: 300),
+            .init(along: 5000, elapsed: 600)
+        ]
+        XCTAssertEqual(RouteRemainingTime.seconds(progress: 0, totalLength: 5000, expectedTravelTime: 600, milestones: milestones), 600, accuracy: 0.01)
+        XCTAssertEqual(RouteRemainingTime.seconds(progress: 500, totalLength: 5000, expectedTravelTime: 600, milestones: milestones), 450, accuracy: 0.01)
+        XCTAssertEqual(RouteRemainingTime.seconds(progress: 1000, totalLength: 5000, expectedTravelTime: 600, milestones: milestones), 300, accuracy: 0.01)
+        XCTAssertEqual(RouteRemainingTime.seconds(progress: 3000, totalLength: 5000, expectedTravelTime: 600, milestones: milestones), 150, accuracy: 0.01)
+        XCTAssertEqual(RouteRemainingTime.seconds(progress: 5000, totalLength: 5000, expectedTravelTime: 600, milestones: milestones), 0, accuracy: 0.01)
+        XCTAssertEqual(RouteRemainingTime.seconds(progress: 1000, totalLength: 5000, expectedTravelTime: 600, milestones: []), 480, accuracy: 0.01)
+    }
+    func testRecentSearchQueriesDeduplicatesInsensitivelyAndCapsCount() {
+        var recents: [String] = []
+        recents = RecentSearchQueries.record(" ", into: recents)
+        recents = RecentSearchQueries.record("a", into: recents)
+        XCTAssertTrue(recents.isEmpty)
+        for index in 1...7 {
+            recents = RecentSearchQueries.record("Địa điểm \(index)", into: recents)
+        }
+        XCTAssertEqual(recents.count, 6)
+        XCTAssertEqual(recents.first, "Địa điểm 7")
+        recents = RecentSearchQueries.record("  địa điểm 3 ", into: recents)
+        XCTAssertEqual(recents.count, 6)
+        XCTAssertEqual(recents.first, "địa điểm 3")
+        XCTAssertEqual(recents.filter { $0.hasSuffix("3") }.count, 1)
+    }
 }
